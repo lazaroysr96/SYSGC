@@ -1,0 +1,1168 @@
+import { type FC, useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Cloud, CloudOff, DatabaseBackup, Download, LogIn, Menu, RefreshCw } from "lucide-react";
+import Loading from "@/components/Loading";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+import { getLedgerRepository } from "./data/getLedgerRepository";
+import { useGcTcpAuth } from "./hooks/useGcTcpAuth";
+import { useSyncManager } from "./hooks/useSyncManager";
+import type { SyncState } from "./data/SyncManager";
+import type { CatalogoCompra, CatalogoVenta, CloudLedgerContainer, HistorialPrecio, Moneda, MonedaTasa, MonedaTasaHistorial, StockRegistro, WalletMovimiento, WalletMovimientoTipo, WalletReferenciaTipo, WalletTipo } from "../accounting/core/types/accountingTypes";
+import {
+  calculateWorkspaceAnalysis,
+  ensureRegistroYear,
+  formatLedgerDate,
+  formatMoney,
+  getWorkspaceForYear,
+  getWorkspaceYears,
+  normalizeLedgerYear,
+} from "./accountingMath";
+import { EmptyState, GcTcpSidebar } from "./components";
+import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
+import { NomenclatorsView } from "./nomenclators/NomenclatorsView";
+import { PointOfSaleView } from "./pos/PointOfSaleView";
+import type { ProductPriceUpdate, ProductStockUpdate } from "./products/ProductEditDialogs";
+import { getProductUsage } from "./products/productUtils";
+import { getViewTitle } from "./navigation";
+import type { GcTcpView, LedgerApiResponse } from "./types";
+import {
+  BackupView,
+  CatalogosView,
+  DashboardView,
+  EntriesView,
+  ResumenView,
+  SupportView,
+  TercerosView,
+  TributosView,
+} from "./views";
+import CajaBanco from "./modules/CajaBaco";
+import DjGeneral from "./dj/General";
+import { useDjActions } from "./hooks/useDjActions";
+import EstadoResultadoView from "./views/EstadoResultadoView";
+import LibroDiarioView from "./libros/LibroDiarioView";
+
+type ProductLedgerToast = {
+  title: string;
+  description: string;
+};
+
+const formatProductQuantity = (value: number): string =>
+  value.toLocaleString("es-CU", { maximumFractionDigits: 2 });
+
+const syncStateLabel: Record<SyncState, { label: string; tone: "ok" | "warn" | "err" }> = {
+  idle: { label: "Sin sincronizar", tone: "warn" },
+  syncing: { label: "Sincronizando…", tone: "warn" },
+  synced: { label: "Sincronizado", tone: "ok" },
+  offline: { label: "Sin conexión", tone: "err" },
+  "no-session": { label: "Inicia sesión para sincronizar", tone: "warn" },
+  error: { label: "Error de sincronización", tone: "err" },
+};
+
+const SyncStateIcon: FC<{ state: SyncState }> = ({ state }) => {
+  const cls =
+    syncStateLabel[state].tone === "ok"
+      ? "text-emerald-500"
+      : syncStateLabel[state].tone === "err"
+        ? "text-red-500"
+        : "text-slate-400";
+
+  if (state === "syncing") {
+    return <RefreshCw className={cn("h-3.5 w-3.5 animate-spin", cls)} />;
+  }
+  if (state === "synced") {
+    return <Cloud className={cn("h-3.5 w-3.5", cls)} />;
+  }
+  if (state === "offline" || state === "error") {
+    return <CloudOff className={cn("h-3.5 w-3.5", cls)} />;
+  }
+  return <Cloud className={cn("h-3.5 w-3.5", cls)} />;
+};
+
+const GC_TCP: FC = () => {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const { user, loading: authLoading, desktopMode } = useGcTcpAuth();
+  const {
+    state: syncState,
+    message: syncMessage,
+    runSync,
+  } = useSyncManager(desktopMode);
+  const [loadingLedger, setLoadingLedger] = useState(true);
+  const [data, setData] = useState<LedgerApiResponse | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>("");
+  const [selectedView, setSelectedView] = useState<GcTcpView>("dashboard");
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [savingWorkspace, setSavingWorkspace] = useState(false);
+  const [workspaceIdToDelete, setWorkspaceIdToDelete] = useState<string | null>(
+    null,
+  );
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(
+    null,
+  );
+  const [savingProductChanges, setSavingProductChanges] = useState(false);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [savingYear, setSavingYear] = useState(false);
+  const [savingWallet, setSavingWallet] = useState(false);
+
+  const repository = getLedgerRepository();
+
+  useEffect(() => {
+    if (!desktopMode && !authLoading && !user) navigate("/login");
+  }, [authLoading, navigate, user, desktopMode]);
+
+  let loadLedgerRunCount = 0;
+
+const loadLedger = useCallback(async () => {
+    if (!user) return;
+    loadLedgerRunCount++;
+    console.log(`[GC_TCP] loadLedger called #${loadLedgerRunCount}`, {
+      loadingLedger: data === null,
+      workspaces: data?.registro?.workspaces?.length,
+    });
+    setLoadingLedger(true);
+    try {
+      const response = await repository.loadLedger();
+      setData(response);
+      const ledger = response.registro;
+      const firstWorkspace = ledger?.workspaces[0];
+      setActiveWorkspaceId(
+        ledger?.activeWorkspaceId || firstWorkspace?.id || "",
+      );
+    } catch {
+      toast({
+        title: "Error",
+        description: "No se pudo cargar el registro contable",
+        variant: "destructive",
+      });
+      setData(null);
+    } finally {
+      setLoadingLedger(false);
+    }
+  }, [toast, user, repository]);
+
+  useEffect(() => {
+    console.log("[GC_TCP] loadLedger useEffect triggered", {
+      user: !!user,
+      authLoading,
+      desktopMode,
+    });
+    if (user) void loadLedger();
+  }, [loadLedger, user]);
+
+  const ledger = data?.registro ?? null;
+  const baseActiveWorkspace =
+    ledger?.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
+    ledger?.workspaces[0] ??
+    null;
+  const yearOptions = useMemo(
+    () => getWorkspaceYears(baseActiveWorkspace),
+    [baseActiveWorkspace],
+  );
+  const analyses = useMemo(
+    () =>
+      ledger?.workspaces.map((workspace) =>
+        calculateWorkspaceAnalysis(getWorkspaceForYear(workspace, selectedYear)),
+      ) ?? [],
+    [ledger, selectedYear],
+  );
+  const activeAnalysis =
+    analyses.find((analysis) => analysis.workspace.id === activeWorkspaceId) ??
+    analyses[0] ??
+    null;
+  const activeWorkspace = activeAnalysis?.workspace ?? null;
+
+  useEffect(() => {
+    if (!baseActiveWorkspace) return;
+    setSelectedYear(normalizeLedgerYear(baseActiveWorkspace.registro.generales?.anio));
+  }, [activeWorkspaceId, baseActiveWorkspace]);
+
+  const totals = useMemo(
+    () => ({
+      ingresos: analyses.reduce(
+        (total, analysis) => total + analysis.totalIngresos,
+        0,
+      ),
+      gastos: analyses.reduce(
+        (total, analysis) => total + analysis.totalGastos,
+        0,
+      ),
+      neto: analyses.reduce(
+        (total, analysis) => total + analysis.baseImponible,
+        0,
+      ),
+      asientos: analyses.reduce(
+        (total, analysis) => total + analysis.incomeRows + analysis.expenseRows,
+        0,
+      ),
+    }),
+    [analyses],
+  );
+
+  const djActions = useDjActions({
+    ledger,
+    activeWorkspaceId,
+    data,
+    setData,
+    repository,
+    toast,
+  });
+
+
+  const handleSelectYear = async (yearValue: string) => {
+    const nextYear = normalizeLedgerYear(yearValue);
+    if (!ledger || !baseActiveWorkspace || nextYear === selectedYear) return;
+
+    const previousYear = selectedYear;
+    const updatedLedger: CloudLedgerContainer = {
+      ...ledger,
+      workspaces: ledger.workspaces.map((workspace) =>
+        workspace.id === baseActiveWorkspace.id
+          ? {
+              ...workspace,
+              registro: ensureRegistroYear(workspace.registro, nextYear),
+            }
+          : workspace,
+      ),
+    };
+
+    setSelectedYear(nextYear);
+    setData((current) =>
+      current ? { ...current, registro: updatedLedger } : current,
+    );
+    setSavingYear(true);
+    try {
+      await repository.saveLedger(
+        updatedLedger,
+        data?.inventarioRegistro ?? null,
+      );
+      toast({
+        title: "Año fiscal seleccionado",
+        description: `Ingresos, gastos y operaciones POS se muestran para ${nextYear}.`,
+      });
+    } catch {
+      setSelectedYear(previousYear);
+      setData((current) =>
+        current ? { ...current, registro: ledger } : current,
+      );
+      toast({
+        title: "No se pudo cambiar el año fiscal",
+        description: "Se mantuvo el año anterior para no desincronizar los registros.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingYear(false);
+    }
+  };
+
+  const handleSelectWorkspace = async (workspaceId: string) => {
+    if (!ledger || workspaceId === activeWorkspaceId) return;
+    const updatedLedger: CloudLedgerContainer = {
+      ...ledger,
+      activeWorkspaceId: workspaceId,
+    };
+    setActiveWorkspaceId(workspaceId);
+    setData((current) =>
+      current ? { ...current, registro: updatedLedger } : current,
+    );
+    setSavingWorkspace(true);
+    try {
+      await repository.saveLedger(
+        updatedLedger,
+        data?.inventarioRegistro ?? null,
+      );
+      toast({ title: "Espacio activo actualizado" });
+    } catch {
+      setActiveWorkspaceId(ledger.activeWorkspaceId);
+      setData((current) =>
+        current ? { ...current, registro: ledger } : current,
+      );
+      toast({
+        title: "No se pudo guardar el espacio activo",
+        description:
+          "La vista cambio se revirtio para mantener la sincronizacion.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingWorkspace(false);
+    }
+  };
+
+  const handleDeleteWorkspace = async () => {
+    if (!ledger || !workspaceIdToDelete) return;
+    if (ledger.workspaces.length <= 1) {
+      toast({
+        title: "No se puede eliminar",
+        description: "Debe existir al menos un espacio de trabajo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const workspaceToDelete = ledger.workspaces.find(
+      (workspace) => workspace.id === workspaceIdToDelete,
+    );
+    if (!workspaceToDelete) return;
+
+    const remainingWorkspaces = ledger.workspaces.filter(
+      (workspace) => workspace.id !== workspaceIdToDelete,
+    );
+    const nextActiveWorkspaceId =
+      ledger.activeWorkspaceId === workspaceIdToDelete
+        ? (remainingWorkspaces[0]?.id ?? "")
+        : ledger.activeWorkspaceId;
+    const updatedLedger: CloudLedgerContainer = {
+      ...ledger,
+      activeWorkspaceId: nextActiveWorkspaceId,
+      workspaces: remainingWorkspaces,
+    };
+
+    setSavingWorkspace(true);
+    try {
+      await repository.saveLedger(
+        updatedLedger,
+        data?.inventarioRegistro ?? null,
+      );
+      setData((current) =>
+        current ? { ...current, registro: updatedLedger } : current,
+      );
+      setActiveWorkspaceId(nextActiveWorkspaceId);
+      setWorkspaceIdToDelete(null);
+      toast({
+        title: "Espacio eliminado",
+        description: `${workspaceToDelete.name} fue eliminado del ledger.`,
+      });
+    } catch {
+      toast({
+        title: "No se pudo eliminar",
+        description: "El espacio de trabajo no fue modificado.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingWorkspace(false);
+    }
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    if (!ledger || !activeWorkspace) return;
+    const usage = getProductUsage(activeWorkspace, productId);
+    if (!usage.canDelete) {
+      toast({
+        title: "No se pudo eliminar desde Cuentas y Productos",
+        description: `El producto esta vinculado a ${usage.labels.join(", ")}. Revisa esos registros antes de eliminarlo del catalogo.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const product = activeWorkspace.registro.inventario.productos.find(
+      (item) => item.id === productId,
+    );
+    if (!product) return;
+
+    const updatedWorkspaces = ledger.workspaces.map((workspace) => {
+      if (workspace.id !== activeWorkspace.id) return workspace;
+      return {
+        ...workspace,
+        registro: {
+          ...workspace.registro,
+          inventario: {
+            ...workspace.registro.inventario,
+            productos: workspace.registro.inventario.productos.filter(
+              (item) => item.id !== productId,
+            ),
+          },
+        },
+      };
+    });
+    const updatedLedger: CloudLedgerContainer = {
+      ...ledger,
+      workspaces: updatedWorkspaces,
+    };
+
+    setDeletingProductId(productId);
+    try {
+      await repository.saveLedger(
+        updatedLedger,
+        data?.inventarioRegistro ?? null,
+      );
+      setData((current) =>
+        current ? { ...current, registro: updatedLedger } : current,
+      );
+      toast({
+        title: "Producto eliminado de Cuentas y Productos",
+        description: `${product.nombre} ya no aparece en el catalogo del espacio activo.`,
+      });
+    } catch {
+      toast({
+        title: "No se pudo eliminar desde Cuentas y Productos",
+        description: `${product.nombre} no fue modificado. Intenta nuevamente desde el catalogo.`,
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingProductId(null);
+    }
+  };
+
+
+  const persistProductLedger = async (
+    updatedLedger: CloudLedgerContainer,
+    successToast: ProductLedgerToast,
+    failureToast: ProductLedgerToast,
+  ) => {
+    setSavingProductChanges(true);
+    try {
+      await repository.saveLedger(
+        updatedLedger,
+        data?.inventarioRegistro ?? null,
+      );
+      setData((current) =>
+        current ? { ...current, registro: updatedLedger } : current,
+      );
+      toast(successToast);
+    } catch {
+      toast({ ...failureToast, variant: "destructive" });
+    } finally {
+      setSavingProductChanges(false);
+    }
+  };
+
+  const handleUpdateProductPrice = async (payload: ProductPriceUpdate) => {
+    if (!ledger || !activeWorkspace) return;
+    const now = Date.now();
+    const isoDate = new Date(now).toISOString();
+    const product = activeWorkspace.registro.inventario.productos.find((item) => item.id === payload.productId);
+    if (!product) return;
+
+    const updatedWorkspaces = ledger.workspaces.map((workspace) => {
+      if (workspace.id !== activeWorkspace.id) return workspace;
+      const { inventario } = workspace.registro;
+      const principalWarehouse = inventario.almacenes.find((almacen) => almacen.principal) ?? inventario.almacenes[0] ?? null;
+      const existingSaleItems = inventario.catalogoVentas.filter((item) => item.productoId === payload.productId && item.activo);
+      const existingPurchaseItems = inventario.catalogoCompras.filter((item) => item.productoId === payload.productId && item.activo);
+      const newPriceHistory: HistorialPrecio = {
+        id: `price-${payload.productId}-${payload.tipoPrecio.toLowerCase()}-${now}`,
+        productoId: payload.productId,
+        almacenId: principalWarehouse?.id ?? "principal",
+        fechaDesde: isoDate,
+        precio: payload.precio,
+        moneda: "CUP",
+        tipoPrecio: payload.tipoPrecio,
+        activo: true,
+        createdAt: now,
+      };
+
+      const catalogoVentas = payload.tipoPrecio === "VENTA"
+        ? existingSaleItems.length > 0
+          ? inventario.catalogoVentas.map((item): CatalogoVenta =>
+              item.productoId === payload.productId && item.activo
+                ? { ...item, precioReferencia: payload.precio }
+                : item,
+            )
+          : principalWarehouse
+            ? [
+                ...inventario.catalogoVentas,
+                {
+                  id: `venta-${payload.productId}-${now}`,
+                  productoId: payload.productId,
+                  precioReferencia: payload.precio,
+                  almacenId: principalWarehouse.id,
+                  activo: true,
+                },
+              ]
+            : inventario.catalogoVentas
+        : inventario.catalogoVentas;
+
+      const catalogoCompras = payload.tipoPrecio === "COMPRA"
+        ? existingPurchaseItems.length > 0
+          ? inventario.catalogoCompras.map((item): CatalogoCompra =>
+              item.productoId === payload.productId && item.activo
+                ? { ...item, precioReferencia: payload.precio }
+                : item,
+            )
+          : principalWarehouse
+            ? [
+                ...inventario.catalogoCompras,
+                {
+                  id: `compra-${payload.productId}-${now}`,
+                  productoId: payload.productId,
+                  precioReferencia: payload.precio,
+                  almacenDestinoId: principalWarehouse.id,
+                  activo: true,
+                },
+              ]
+            : inventario.catalogoCompras
+        : inventario.catalogoCompras;
+
+      return {
+        ...workspace,
+        registro: {
+          ...workspace.registro,
+          inventario: {
+            ...inventario,
+            productos: inventario.productos.map((item) =>
+              item.id === payload.productId ? { ...item, precio: payload.precio } : item,
+            ),
+            catalogoVentas,
+            catalogoCompras,
+            historialPrecios: [
+              ...inventario.historialPrecios.map((item) =>
+                item.productoId === payload.productId && item.tipoPrecio === payload.tipoPrecio
+                  ? { ...item, activo: false }
+                  : item,
+              ),
+              newPriceHistory,
+            ],
+          },
+        },
+      };
+    });
+
+    await persistProductLedger(
+      { ...ledger, workspaces: updatedWorkspaces },
+      {
+        title: "Precio actualizado en Cuentas y Productos",
+        description: `${product.nombre}: precio de ${payload.tipoPrecio === "VENTA" ? "venta" : "compra"} cambiado a ${formatMoney(payload.precio)}.`,
+      },
+      {
+        title: "No se pudo guardar el precio en Cuentas y Productos",
+        description: `${product.nombre} mantiene su precio anterior. Intenta nuevamente desde el catalogo.`,
+      },
+    );
+  };
+
+  const handleUpdateProductStock = async (payload: ProductStockUpdate) => {
+    if (!ledger || !activeWorkspace) return;
+    const now = Date.now();
+    const product = activeWorkspace.registro.inventario.productos.find((item) => item.id === payload.productId);
+    if (!product) return;
+
+    const warehouseName = activeWorkspace.registro.inventario.almacenes.find(
+      (almacen) => almacen.id === payload.almacenId,
+    )?.nombre ?? payload.almacenId;
+
+    const updatedWorkspaces = ledger.workspaces.map((workspace) => {
+      if (workspace.id !== activeWorkspace.id) return workspace;
+      const { inventario } = workspace.registro;
+      const existingStock = inventario.stock.find(
+        (item) => item.productoId === payload.productId && item.almacenId === payload.almacenId,
+      );
+      const updatedStock = existingStock
+        ? inventario.stock.map((item): StockRegistro =>
+            item.id === existingStock.id
+              ? {
+                  ...item,
+                  stockDisponible: payload.stockDisponible,
+                  modoStock: payload.modoStock,
+                  ultimaActualizacion: new Date(now).toISOString(),
+                }
+              : item,
+          )
+        : [
+            ...inventario.stock,
+            {
+              id: `stock-${payload.productId}-${payload.almacenId}-${now}`,
+              productoId: payload.productId,
+              almacenId: payload.almacenId,
+              stockDisponible: payload.stockDisponible,
+              modoStock: payload.modoStock,
+              productosVinculadosIds: "[]",
+              ratiosConversion: "{}",
+              ultimaActualizacion: new Date(now).toISOString(),
+              visibleEnVentas: true,
+            },
+          ];
+
+      return {
+        ...workspace,
+        registro: {
+          ...workspace.registro,
+          inventario: {
+            ...inventario,
+            stock: updatedStock,
+          },
+        },
+      };
+    });
+
+    await persistProductLedger(
+      { ...ledger, workspaces: updatedWorkspaces },
+      {
+        title: "Disponibilidad actualizada en Cuentas y Productos",
+        description: `${product.nombre}: ${formatProductQuantity(payload.stockDisponible)} ${product.unidad || "unidades"} en ${warehouseName} (${payload.modoStock.toLowerCase()}).`,
+      },
+      {
+        title: "No se pudo guardar la disponibilidad en Cuentas y Productos",
+        description: `${product.nombre} mantiene su cantidad anterior en ${warehouseName}. Intenta nuevamente desde el catalogo.`,
+      },
+    );
+  };
+
+  const handleCreateWallet = async (payload: {
+    nombre: string;
+    tipo: WalletTipo;
+    saldoInicial: number;
+	monedaId: string;
+  }) => {
+    if (!ledger || !activeWorkspace) return;
+    const now = Date.now();
+    const newWallet = {
+      id: `wallet-${now}`,
+      nombre: payload.nombre,
+      tipo: payload.tipo,
+      saldoInicial: payload.saldoInicial,
+      monedaId: payload.monedaId,
+      activo: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const updatedWorkspaces = ledger.workspaces.map((workspace) =>
+      workspace.id !== activeWorkspace.id
+        ? workspace
+        : {
+            ...workspace,
+            accounting: {
+              ...workspace.accounting,
+              wallets: [...(workspace.accounting.wallets ?? []), newWallet],
+            },
+          },
+    );
+    const updatedLedger: CloudLedgerContainer = {
+      ...ledger,
+      workspaces: updatedWorkspaces,
+    };
+    setSavingWallet(true);
+    try {
+      await repository.saveLedger(
+        updatedLedger,
+        data?.inventarioRegistro ?? null,
+      );
+      setData((current) =>
+        current ? { ...current, registro: updatedLedger } : current,
+      );
+      toast({ title: "Billetera creada" });
+    } catch {
+      toast({ title: "No se pudo crear la billetera", variant: "destructive" });
+    } finally {
+      setSavingWallet(false);
+    }
+  };
+
+  const handleUpdateMonedaTasa = async (monedaId: string, newTasa: number) => {
+  if (!ledger || !activeWorkspace) return;
+
+  const now = Date.now();
+
+  const newMonedaTasaHistorial: MonedaTasaHistorial = {
+    id: `tasaHistorial-${monedaId}-${now}`,
+    monedaId,
+    tasa: newTasa,
+    createdAt: now,
+  };
+
+  const updatedWorkspaces = ledger.workspaces.map((workspace) =>
+    workspace.id !== activeWorkspace.id
+      ? workspace
+      : {
+          ...workspace,
+          accounting: {
+            ...workspace.accounting,
+            monedaTasas: (workspace.accounting.monedaTasas ?? []).map((t) =>
+              t.id !== monedaId
+                ? t
+                : { ...t, tasa: newTasa, updatedAt: now },
+            ),
+            monedaTasaHistorial: [
+              ...(workspace.accounting.monedaTasaHistorial ?? []),
+              newMonedaTasaHistorial,
+            ],
+          },
+        },
+  );
+
+  const updatedLedger: CloudLedgerContainer = {
+    ...ledger,
+    workspaces: updatedWorkspaces,
+  };
+
+  setSavingWallet(true);
+  try {
+    await repository.saveLedger(
+      updatedLedger,
+      data?.inventarioRegistro ?? null,
+    );
+	setData((current) =>
+        current ? { ...current, registro: updatedLedger } : current,
+      );
+      toast({ title: "Tasa de cambio actualizada" });
+  } catch {
+    toast({ title: "No se pudo actualizar la tasa", variant: "destructive" });
+  } finally {
+    setSavingWallet(false);
+  }
+};
+
+  const handleCreateMoneda = async (payload: {
+  nombre: string;
+  tipo: string;
+  tasaInicial: number;
+}) => {
+  if (!ledger || !activeWorkspace) return;
+
+  const now = Date.now();
+
+  // 1. Crear la tasa
+  const newMonedaTasa: MonedaTasa = {
+    id: `tasa-${now}`,
+    nombre: payload.nombre,
+    tasa: payload.tasaInicial,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // 2. Crear el primer registro de historial para esa tasa
+  const newMonedaTasaHistorial: MonedaTasaHistorial = {
+    id: `tasaHistorial-${newMonedaTasa.id}-${now}`,
+    monedaId: `moneda-${now}`, // se anticipa el id de la moneda
+    tasa: payload.tasaInicial,
+    createdAt: now,
+  };
+
+  // 3. Crear la moneda vinculada a la tasa
+  const newMoneda: Moneda = {
+    id: `moneda-${now}`,
+    nombre: payload.nombre,
+    tipo: payload.tipo,
+    tasaId: newMonedaTasa.id,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const updatedWorkspaces = ledger.workspaces.map((workspace) =>
+    workspace.id !== activeWorkspace.id
+      ? workspace
+      : {
+          ...workspace,
+          accounting: {
+            ...workspace.accounting,
+            monedaTasas: [
+              ...(workspace.accounting.monedaTasas ?? []),
+              newMonedaTasa,
+            ],
+            monedaTasaHistorial: [
+              ...(workspace.accounting.monedaTasaHistorial ?? []),
+              newMonedaTasaHistorial,
+            ],
+            monedas: [
+              ...(workspace.accounting.monedas ?? []),
+              newMoneda,
+            ],
+          },
+        },
+  );
+
+  const updatedLedger: CloudLedgerContainer = {
+    ...ledger,
+    workspaces: updatedWorkspaces,
+  };
+
+  setSavingWallet(true);
+  try {
+    await repository.saveLedger(
+      updatedLedger,
+      data?.inventarioRegistro ?? null,
+    );
+	setData((current) =>
+        current ? { ...current, registro: updatedLedger } : current,
+      );
+      toast({ title: "Moneda creada" });
+  } catch {
+    toast({ title: "No se pudo crear la moneda", variant: "destructive" });
+  } finally {
+    setSavingWallet(false);
+  }
+};
+
+const handleCreateMovimiento = async (payload: {
+	tipo: WalletMovimientoTipo;
+		walletOrigenId: string | null;
+		walletDestinoId: string | null;
+		monto: number;
+		monedaId: string;
+		tasaAlMomento: number;
+		referenciaTipo: WalletReferenciaTipo | null;
+		nota: string;
+		fecha: string;
+  }) => {
+    if (!ledger || !activeWorkspace) return;
+
+    const now = Date.now();
+    const newMovimiento: WalletMovimiento = {
+      id: `movimiento-${now}`,
+	  walletOrigenId: payload.walletOrigenId,
+	  walletDestinoId: payload.walletDestinoId,
+	  monto: payload.monto,
+	  tasaAlMomento: payload.tasaAlMomento,
+	  monedaId: payload.monedaId,
+	  tipo: payload.tipo,
+	  referenciaId: null, // Podrías generar un ID de referencia si es necesario
+	  referenciaTipo: payload.referenciaTipo,
+	  nota: payload.nota,
+	  fecha: payload.fecha,
+	  createdAt: now,
+    };
+
+	const updatedWorkspaces = ledger.workspaces.map((workspace) =>
+      workspace.id !== activeWorkspace.id
+        ? workspace
+        : {
+            ...workspace,
+            accounting: {
+              ...workspace.accounting,
+              walletMovimientos: [...(workspace.accounting.walletMovimientos ?? []), newMovimiento],
+            },
+          },
+    );
+
+    
+	const updatedLedger: CloudLedgerContainer = {
+	  ...ledger,
+	  workspaces: updatedWorkspaces,
+	};
+	setSavingWallet(true);
+	try {
+	  await repository.saveLedger(
+		updatedLedger,
+		data?.inventarioRegistro ?? null,
+	  );
+	  setData((current) =>
+        current ? { ...current, registro: updatedLedger } : current,
+      );
+      toast({ title: "Movimiento registrado" });
+	} catch {
+	  toast({ title: "No se pudo crear el movimiento", variant: "destructive" });
+	} finally {
+	  setSavingWallet(false);
+	}
+  };
+
+  const handleDownloadBackup = () => {
+    if (!ledger) return;
+    const backup = {
+      registro: ledger,
+      inventarioRegistro: data?.inventarioRegistro ?? null,
+      updatedAt: data?.updatedAt ?? new Date().toISOString(),
+      exportedAt: new Date().toISOString(),
+      source: "sysgd-client-gctcp",
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `gctcp-respaldo-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    toast({ title: "Respaldo descargado" });
+  };
+
+  const renderContent = () => {
+    if (!activeWorkspace || !activeAnalysis) {
+      return (
+        <EmptyState
+          title="Sin espacio activo"
+          description="Selecciona o carga un respaldo para visualizar el registro."
+          icon={<DatabaseBackup />}
+        />
+      );
+    }
+
+    switch (selectedView) {
+      case "dashboard":
+        return (
+          <DashboardView
+            analyses={analyses}
+            activeAnalysis={activeAnalysis}
+            activeWorkspaceId={activeWorkspace.id}
+            savingWorkspace={savingWorkspace}
+            totals={totals}
+            onSelectWorkspace={handleSelectWorkspace}
+            onRequestDeleteWorkspace={setWorkspaceIdToDelete}
+          />
+        );
+      case "generales":
+        return (
+          <DjGeneral
+            workspace={activeWorkspace}
+            analysis={activeAnalysis}
+            saving={djActions.saving}
+            onSave={djActions.handleUpdateGenerals}
+          />
+        );
+      case "ingresos":
+        return <EntriesView workspace={activeWorkspace} type="ingresos" />;
+      case "gastos":
+        return <EntriesView workspace={activeWorkspace} type="gastos" />;
+      case "tributos":
+        return (
+          <TributosView workspace={activeWorkspace} analysis={activeAnalysis} />
+        );
+      case "resumen":
+        return <ResumenView analysis={activeAnalysis} />;
+      case "estadoResultado":
+        return <EstadoResultadoView workspace={activeWorkspace} />;
+      case "libroDiario":
+        return <LibroDiarioView workspace={activeWorkspace} />;
+      case "ventas":
+        return <PointOfSaleView workspace={activeWorkspace} selectedYear={selectedYear} />;
+      case "cajaBanco":
+        return (
+          <CajaBanco
+            workspace={activeWorkspace}
+            onCreateWallet={handleCreateWallet}
+            savingWallet={savingWallet}
+			monedaTasas={activeWorkspace.accounting.monedaTasas ?? []}
+			monedas={activeWorkspace.accounting.monedas ?? []}
+			onCreateMovimiento={handleCreateMovimiento}
+			onUpdateMonedaTasa={handleUpdateMonedaTasa}
+			savingMovimiento={savingWallet}
+			onCreateMoneda={handleCreateMoneda}
+			savingMoneda={savingWallet}
+          />
+        );
+      case "terceros":
+        return <TercerosView workspace={activeWorkspace} />;
+      case "catalogos":
+        return (
+          <CatalogosView
+            workspace={activeWorkspace}
+            deletingProduct={Boolean(deletingProductId)}
+            savingProductChanges={savingProductChanges}
+            onDeleteProduct={handleDeleteProduct}
+            onUpdateProductPrice={handleUpdateProductPrice}
+            onUpdateProductStock={handleUpdateProductStock}
+          />
+        );
+      case "nomencladores":
+        return <NomenclatorsView />;
+      case "respaldo":
+        return (
+          <BackupView
+            onReload={loadLedger}
+            onDownloadBackup={handleDownloadBackup}
+            canDownload={Boolean(ledger)}
+          />
+        );
+      case "documentos":
+      case "seguridad":
+      case "licencias":
+      case "acerca":
+      case "ayuda":
+      case "recursos":
+        return <SupportView view={selectedView} />;
+      default:
+        return null;
+    }
+  };
+
+  if (authLoading || loadingLedger) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-slate-950">
+        <Loading
+          textLoading={
+            authLoading
+              ? "Verificando sesion..."
+              : "Cargando registro contable..."
+          }
+        />
+      </div>
+    );
+  }
+
+  if (!user) return null;
+
+  if (!ledger || ledger.workspaces.length === 0) {
+    return (
+      <div className="h-full w-full overflow-auto bg-slate-50 p-4 dark:bg-slate-950">
+        <div className="mx-auto max-w-4xl">
+          <BackupView
+            onReload={loadLedger}
+            onDownloadBackup={handleDownloadBackup}
+            canDownload={false}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full w-full overflow-hidden bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-50">
+      <DeleteWorkspaceDialog
+        workspace={
+          ledger.workspaces.find(
+            (workspace) => workspace.id === workspaceIdToDelete,
+          ) ?? null
+        }
+        open={Boolean(workspaceIdToDelete)}
+        deleting={savingWorkspace}
+        onOpenChange={(open) => {
+          if (!open && !savingWorkspace) setWorkspaceIdToDelete(null);
+        }}
+        onConfirm={handleDeleteWorkspace}
+      />
+      <div className="hidden lg:block">
+        <GcTcpSidebar view={selectedView} onSelect={setSelectedView} />
+      </div>
+      {isMobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 flex lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/60"
+            aria-label="Cerrar menu"
+            onClick={() => setIsMobileSidebarOpen(false)}
+          />
+          <div className="relative h-full">
+            <GcTcpSidebar
+              view={selectedView}
+              onSelect={setSelectedView}
+              onClose={() => setIsMobileSidebarOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+      <main className="min-w-0 flex-1 overflow-auto">
+        <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Button
+                variant="outline"
+                size="icon"
+                className="lg:hidden"
+                onClick={() => setIsMobileSidebarOpen(true)}
+                aria-label="Abrir menu"
+              >
+                <Menu />
+              </Button>
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase text-emerald-700 dark:text-emerald-300">
+                  GC TCP escritorio
+                </p>
+                <h1 className="truncate text-xl font-semibold text-slate-950 dark:text-slate-50">
+                  {getViewTitle(selectedView)}
+                </h1>
+                <p className="truncate text-sm text-slate-500 dark:text-slate-400">
+                  {activeWorkspace?.name ?? "Sin espacio"} /{" "}
+                  {formatLedgerDate(data?.updatedAt ?? null)}
+                  {desktopMode && " · Trabajando offline"}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 dark:border-slate-800 dark:bg-slate-900">
+                <span className="text-xs font-medium uppercase text-slate-500 dark:text-slate-400">Año</span>
+                <Select
+                  value={String(selectedYear)}
+                  onValueChange={(value) => void handleSelectYear(value)}
+                  disabled={savingYear}
+                >
+                  <SelectTrigger className="h-8 w-[5.75rem] border-0 px-2 shadow-none focus:ring-0">
+                    <SelectValue placeholder="Año" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {yearOptions.map((year) => (
+                      <SelectItem key={year} value={String(year)}>
+                        {year}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Badge variant="outline">
+                {ledger.workspaces.length} workspace
+                {ledger.workspaces.length === 1 ? "" : "s"}
+              </Badge>
+              {desktopMode && (
+                <Badge className="bg-emerald-600 text-white dark:bg-emerald-500 dark:text-emerald-950">
+                  Modo Local
+                </Badge>
+              )}
+              {desktopMode && (
+                <div className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-800 dark:bg-slate-900">
+                  <SyncStateIcon state={syncState} />
+                  <span
+                    className={cn(
+                      "font-medium",
+                      syncStateLabel[syncState].tone === "ok"
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : syncStateLabel[syncState].tone === "err"
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-slate-600 dark:text-slate-300",
+                    )}
+                    title={syncMessage ?? undefined}
+                  >
+                    {syncStateLabel[syncState].label}
+                  </span>
+                  {syncState === "no-session" && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="ml-0.5 h-5 w-5 p-0"
+                      onClick={() => navigate("/login")}
+                      aria-label="Iniciar sesión para sincronizar"
+                    >
+                      <LogIn className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                  {syncState !== "no-session" && syncState !== "syncing" && (
+                    <button
+                      type="button"
+                      onClick={() => void runSync()}
+                      className="ml-0.5 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-200"
+                      aria-label="Sincronizar ahora"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadBackup}
+              >
+                <Download />
+                Respaldo
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadLedger}
+                disabled={loadingLedger || savingWorkspace}
+              >
+                <RefreshCw className={cn(savingWorkspace && "animate-spin")} />
+                Actualizar
+              </Button>
+            </div>
+          </div>
+          <Separator className="mt-3 lg:hidden" />
+        </header>
+        <div className="p-4 sm:p-6">{renderContent()}</div>
+      </main>
+    </div>
+  );
+};
+
+export default GC_TCP;
