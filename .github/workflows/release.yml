@@ -1,0 +1,100 @@
+name: Release PC
+
+# Publica la versión de escritorio (Windows + Linux) en GitHub Releases.
+# Se dispara al subir un tag v*, ej: git tag v1.0.0 && git push origin v1.0.0
+# La versión del instalador sale de electron/package.json -> súbela antes del tag.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Instalar dependencias (web)
+        run: npm ci
+
+      - name: Build web + copiar a electron/www
+        run: npm run build-electron
+
+      - name: Instalar dependencias (electron)
+        working-directory: electron
+        run: npm ci
+
+      - name: Compilar instalador Windows
+        working-directory: electron
+        run: npx electron-builder --win
+
+      - name: Subir artefacto Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            electron/dist/*.exe
+            electron/dist/*.blockmap
+          if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Instalar dependencias (web)
+        run: npm ci
+
+      - name: Build web + copiar a electron/www
+        run: npm run build-electron
+
+      - name: Instalar dependencias (electron)
+        working-directory: electron
+        run: npm ci
+
+      - name: Compilar AppImage Linux
+        working-directory: electron
+        run: npx electron-builder --linux
+
+      - name: Subir artefacto Linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: electron/dist/*.AppImage
+          if-no-files-found: error
+
+  publish:
+    needs: [build-win, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar artefactos
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publicar Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
