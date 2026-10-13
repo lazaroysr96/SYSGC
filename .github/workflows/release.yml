@@ -16,6 +16,8 @@ permissions:
 jobs:
   build-win:
     runs-on: windows-latest
+    env:
+      VITE_SERVER_URL: https://sysgd-production.up.railway.app
     defaults:
       run:
         shell: pwsh
@@ -53,6 +55,8 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-latest
+    env:
+      VITE_SERVER_URL: https://sysgd-production.up.railway.app
     steps:
       - uses: actions/checkout@v4
 
@@ -85,6 +89,8 @@ jobs:
 
   build-android:
     runs-on: ubuntu-latest
+    env:
+      VITE_SERVER_URL: https://sysgd-production.up.railway.app
     steps:
       - uses: actions/checkout@v4
 
@@ -122,6 +128,8 @@ jobs:
     # NOTA: no se puede usar `secrets` en el `if` de un job (workflow inválido).
     # Este repo tiene los secrets configurados, así que corre siempre.
     runs-on: ubuntu-latest
+    env:
+      VITE_SERVER_URL: https://sysgd-production.up.railway.app
     steps:
       - uses: actions/checkout@v4
 
