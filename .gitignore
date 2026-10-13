@@ -53,6 +53,10 @@ bower_components
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 build/Release
 
+# Keystores de firma: NUNCA se versionan (van en GitHub Secrets)
+*.jks
+*.keystore
+
 # Capacitor / Android (generado por Gradle, no se versiona)
 android/build/
 android/app/build/

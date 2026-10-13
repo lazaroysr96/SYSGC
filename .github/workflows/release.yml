@@ -118,8 +118,57 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
+  build-android-release:
+    # Solo corre si configuraste los secrets de firma (ver README). Si no
+    # existen, se omite y el Release lleva el APK debug.
+    if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Instalar dependencias (web)
+        run: npm ci
+
+      - name: Build web + sync Capacitor
+        run: |
+          npm run build
+          npx cap sync android
+
+      - name: Restaurar keystore desde el secret
+        working-directory: android/app
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+
+      - name: Compilar APK firmado
+        working-directory: android
+        env:
+          KEYSTORE_FILE: app/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Subir artefacto Android firmado
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-release
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
   publish:
-    needs: [build-win, build-linux, build-android]
+    needs: [build-win, build-linux, build-android, build-android-release]
+    # El job de release puede omitirse (sin secrets): no debe bloquear.
+    if: ${{ always() && (needs.build-win.result == 'success' && needs.build-linux.result == 'success' && needs.build-android.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - name: Descargar artefactos
