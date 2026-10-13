@@ -53,6 +53,13 @@ bower_components
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 build/Release
 
+# Capacitor / Android (generado por Gradle, no se versiona)
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/capacitor-cordova-android-plugins/
+
 # Dependency directories
 node_modules/
 jspm_packages/
