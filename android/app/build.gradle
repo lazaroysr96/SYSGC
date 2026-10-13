@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "cu.lazaroysr96.sysgd"
+    namespace "cu.lazaroysr96.gctcp"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "cu.lazaroysr96.sysgd"
+        applicationId "cu.lazaroysr96.gctcp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

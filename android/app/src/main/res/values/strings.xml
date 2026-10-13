@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">SYSGD</string>
-    <string name="title_activity_main">SYSGD</string>
-    <string name="package_name">cu.lazaroysr96.sysgd</string>
-    <string name="custom_url_scheme">cu.lazaroysr96.sysgd</string>
+    <string name="app_name">GCTCP</string>
+    <string name="title_activity_main">GCTCP</string>
+    <string name="package_name">cu.lazaroysr96.gctcp</string>
+    <string name="custom_url_scheme">cu.lazaroysr96.gctcp</string>
 </resources>

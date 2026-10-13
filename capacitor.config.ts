@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-	appId: "cu.lazaroysr96.sysgd",
-	appName: "SYSGD",
+	appId: "cu.lazaroysr96.gctcp",
+	appName: "GCTCP",
 	webDir: "dist",
 	server: {
 		androidScheme: "https",

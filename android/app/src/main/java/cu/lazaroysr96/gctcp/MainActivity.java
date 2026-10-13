@@ -1,4 +1,4 @@
-package cu.lazaroysr96.sysgd;
+package cu.lazaroysr96.gctcp;
 
 import com.getcapacitor.BridgeActivity;
 
