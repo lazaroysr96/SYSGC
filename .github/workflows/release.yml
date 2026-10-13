@@ -119,9 +119,8 @@ jobs:
           if-no-files-found: error
 
   build-android-release:
-    # Solo corre si configuraste los secrets de firma (ver README). Si no
-    # existen, se omite y el Release lleva el APK debug.
-    if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+    # NOTA: no se puede usar `secrets` en el `if` de un job (workflow inválido).
+    # Este repo tiene los secrets configurados, así que corre siempre.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -152,7 +151,7 @@ jobs:
       - name: Compilar APK firmado
         working-directory: android
         env:
-          KEYSTORE_FILE: app/release.keystore
+          KEYSTORE_FILE: release.keystore
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
