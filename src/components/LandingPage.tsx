@@ -12,9 +12,10 @@ import { IoLogoWhatsapp } from "react-icons/io5";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { isDesktopMode } from "@/gctcp/data/getLedgerRepository";
+import { isCapacitorMode, isDesktopMode } from "@/gctcp/data/getLedgerRepository";
 
-const DESKTOP_ENTRY_URL = isDesktopMode() ? "/gctcp" : "/login";
+// PC y móvil entran directo al workspace (offline-first); la web pura pasa por login.
+const DESKTOP_ENTRY_URL = isDesktopMode() || isCapacitorMode() ? "/gctcp" : "/login";
 
 export default function LandingPage() {
   return (

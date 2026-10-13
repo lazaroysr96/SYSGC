@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useAuthSession } from "@/hooks/connection/useAuthSession";
 import { readStartMode } from "@/contexts/StartupContext";
-import { isDesktopMode } from "../data/getLedgerRepository";
+import { isCapacitorMode, isDesktopMode } from "../data/getLedgerRepository";
 import type { User } from "@/types/user";
 
 function buildLocalUser(name: string, email: string): User {
@@ -47,6 +47,7 @@ function buildLocalUser(name: string, email: string): User {
  *   El trabajo online usa la nube y la salvaguarda local + SyncManager cubre
  *   la pérdida de conexión y el trabajo offline posterior.
  * - Modo escritorio + backup/teléfono (o sin modo): usuario local 100% offline.
+ * - Modo Capacitor (móvil): usuario local 100% offline (WebView + storage local).
  * - Modo web: delega en la sesión remota habitual (useAuthSession).
  */
 export function useGcTcpAuth(): {
@@ -55,6 +56,7 @@ export function useGcTcpAuth(): {
 	desktopMode: boolean;
 } {
 	const desktopMode = isDesktopMode();
+	const capacitorMode = !desktopMode && isCapacitorMode();
 	const remote = useAuthSession();
 	const startMode = desktopMode ? readStartMode() : null;
 
@@ -72,6 +74,10 @@ export function useGcTcpAuth(): {
 			: buildLocalUser("Usuario Local", "local@sysgc.local");
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [localAccount?.email, localAccount?.name]);
+
+	if (capacitorMode) {
+		return { user: localUser, loading: false, desktopMode };
+	}
 
 	if (!desktopMode) {
 		return { user: remote.user, loading: remote.loading, desktopMode };

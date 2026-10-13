@@ -126,7 +126,10 @@ const GC_TCP: FC = () => {
   useEffect(() => {
     if (authLoading || user) return;
     if (!desktopMode) {
-      navigate("/login");
+      // Capacitor (móvil) trabaja offline con usuario local: no exigir login.
+      // Solo la web pura redirige al login.
+      const w = window as Window & { Capacitor?: unknown; capacitor?: unknown };
+      if (!w.Capacitor && !w.capacitor) navigate("/login");
       return;
     }
     // En escritorio, el modo nube exige cuenta SYSGD (el resto sigue offline).
