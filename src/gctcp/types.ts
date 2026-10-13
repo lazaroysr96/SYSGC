@@ -21,6 +21,7 @@ export type GcTcpView =
 	| "terceros"
 	| "documentos"
 	| "catalogos"
+	| "rrhh"
 	| "seguridad"
 	| "licencias"
 	| "respaldo"

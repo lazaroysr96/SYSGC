@@ -2,9 +2,8 @@ import type React from "react";
 import { useEffect, useState } from "react";
 import { TitleBar } from "./TitleBar";
 import { LicenseProvider, useLicense } from "@/contexts/LicenseContext";
-import WelcomeScreen from "@/screens/WelcomeScreen";
-import SetupAccountScreen from "@/screens/SetupAccountScreen";
-import LicenseActivationScreen from "@/screens/LicenseActivationScreen";
+import { StartupProvider, useStartup } from "@/contexts/StartupContext";
+import StartModeScreen from "@/screens/StartModeScreen";
 
 // Detección robusta del entorno
 const isElectron = () => {
@@ -20,10 +19,11 @@ interface ElectronWrapperProps {
 }
 
 function ElectronContent({ children }: ElectronWrapperProps) {
-	const { setupStep, isLoading } = useLicense();
+	const { isLoading: licenseLoading } = useLicense();
+	const { isLoading: startupLoading, isStarted } = useStartup();
 
-	// Mostrar loading mientras se verifica la licencia
-	if (isLoading) {
+	// Mostrar loading mientras se resuelve el modo de inicio
+	if (licenseLoading || startupLoading) {
 		return (
 			<div className="h-screen flex items-center justify-center bg-slate-900">
 				<div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500" />
@@ -31,21 +31,20 @@ function ElectronContent({ children }: ElectronWrapperProps) {
 		);
 	}
 
-	// Si no está completo el setup, mostrar las pantallas correspondientes
-	if (setupStep !== "complete" && window.electronAPI) {
-		switch (setupStep) {
-			case "welcome":
-				return <WelcomeScreen />;
-			case "setup-account":
-				return <SetupAccountScreen />;
-			case "license":
-				return <LicenseActivationScreen />;
-			default:
-				break;
-		}
+	// Sin modo de inicio elegido: mostrar las 3 formas de entrar (nube / backup / teléfono).
+	// El flujo de licencias queda en pausa y no bloquea.
+	if (!isStarted && window.electronAPI) {
+		return (
+			<div className="h-screen flex flex-col overflow-hidden">
+				<TitleBar />
+				<div className="flex-1 w-full overflow-y-auto relative z-10">
+					<StartModeScreen />
+				</div>
+			</div>
+		);
 	}
 
-	// Setup completo, mostrar la app normal
+	// Inicio completo, mostrar la app normal
 	return (
 		<div className="h-screen flex flex-col overflow-hidden">
 			<TitleBar />
@@ -65,15 +64,22 @@ export const ElectronWrapper: React.FC<ElectronWrapperProps> = ({
 		setIsElectronEnv(isElectron());
 	}, []);
 
-	// Si no estamos en Electron, renderizar children sin wrapper
+	// Si no estamos en Electron, exponer Startup igual (para /inicio en web) sin bloquear.
 	if (!isElectronEnv) {
-		return <div className="h-screen relative">{children}</div>;
+		return (
+			<StartupProvider>
+				<div className="h-screen relative">{children}</div>
+			</StartupProvider>
+		);
 	}
 
-	// Si estamos en Electron, envolver con LicenseProvider
+	// En Electron: Startup decide la puerta de entrada. LicenseProvider se conserva
+	// para el futuro flujo de compra/activación, pero ya no bloquea.
 	return (
-		<LicenseProvider>
-			<ElectronContent>{children}</ElectronContent>
-		</LicenseProvider>
+		<StartupProvider>
+			<LicenseProvider>
+				<ElectronContent>{children}</ElectronContent>
+			</LicenseProvider>
+		</StartupProvider>
 	);
 };

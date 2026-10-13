@@ -15,10 +15,11 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { getLedgerRepository } from "./data/getLedgerRepository";
+import { useStartup } from "@/contexts/StartupContext";
 import { useGcTcpAuth } from "./hooks/useGcTcpAuth";
 import { useSyncManager } from "./hooks/useSyncManager";
 import type { SyncState } from "./data/SyncManager";
-import type { CatalogoCompra, CatalogoVenta, CloudLedgerContainer, HistorialPrecio, Moneda, MonedaTasa, MonedaTasaHistorial, StockRegistro, WalletMovimiento, WalletMovimientoTipo, WalletReferenciaTipo, WalletTipo } from "../accounting/core/types/accountingTypes";
+import type { CatalogoCompra, CatalogoVenta, CloudLedgerContainer, HistorialPrecio, Moneda, MonedaTasa, MonedaTasaHistorial, RrhhBackupData, StockRegistro, Tercero, TerceroRol, WalletMovimiento, WalletMovimientoTipo, WalletReferenciaTipo, WalletTipo } from "../accounting/core/types/accountingTypes";
 import {
   calculateWorkspaceAnalysis,
   ensureRegistroYear,
@@ -32,6 +33,7 @@ import { EmptyState, GcTcpSidebar } from "./components";
 import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 import { NomenclatorsView } from "./nomenclators/NomenclatorsView";
 import { PointOfSaleView } from "./pos/PointOfSaleView";
+import { RrhhView } from "./rrhh/RrhhView";
 import type { ProductPriceUpdate, ProductStockUpdate } from "./products/ProductEditDialogs";
 import { getProductUsage } from "./products/productUtils";
 import { getViewTitle } from "./navigation";
@@ -45,8 +47,10 @@ import {
   SupportView,
   TercerosView,
   TributosView,
+  type TerceroUpsert,
 } from "./views";
 import CajaBanco from "./modules/CajaBaco";
+import { VincularLanCard } from "./vinculolan/VincularLan";
 import DjGeneral from "./dj/General";
 import { useDjActions } from "./hooks/useDjActions";
 import EstadoResultadoView from "./views/EstadoResultadoView";
@@ -93,6 +97,7 @@ const GC_TCP: FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user, loading: authLoading, desktopMode } = useGcTcpAuth();
+  const { resetStartup } = useStartup();
   const {
     state: syncState,
     message: syncMessage,
@@ -111,6 +116,7 @@ const GC_TCP: FC = () => {
     null,
   );
   const [savingProductChanges, setSavingProductChanges] = useState(false);
+  const [savingRrhh, setSavingRrhh] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [savingYear, setSavingYear] = useState(false);
   const [savingWallet, setSavingWallet] = useState(false);
@@ -118,7 +124,17 @@ const GC_TCP: FC = () => {
   const repository = getLedgerRepository();
 
   useEffect(() => {
-    if (!desktopMode && !authLoading && !user) navigate("/login");
+    if (authLoading || user) return;
+    if (!desktopMode) {
+      navigate("/login");
+      return;
+    }
+    // En escritorio, el modo nube exige cuenta SYSGD (el resto sigue offline).
+    try {
+      if (localStorage.getItem("sysgd_start_mode") === "cloud") navigate("/login");
+    } catch {
+      // sin almacenamiento, no redirigir
+    }
   }, [authLoading, navigate, user, desktopMode]);
 
   let loadLedgerRunCount = 0;
@@ -437,6 +453,35 @@ const loadLedger = useCallback(async () => {
     }
   };
 
+  const handleSaveRrhh = async (
+    nextRrhh: RrhhBackupData,
+    successToast: ProductLedgerToast,
+  ) => {
+    if (!ledger || !activeWorkspace) return;
+    const updatedWorkspaces = ledger.workspaces.map((workspace) =>
+      workspace.id === activeWorkspace.id ? { ...workspace, rrhh: nextRrhh } : workspace,
+    );
+    const updatedLedger: CloudLedgerContainer = { ...ledger, workspaces: updatedWorkspaces };
+    setSavingRrhh(true);
+    try {
+      await repository.saveLedger(updatedLedger, data?.inventarioRegistro ?? null);
+      setData((current) =>
+        current ? { ...current, registro: updatedLedger } : current,
+      );
+      toast(successToast);
+    } catch {
+      toast({
+        ...successToast,
+        title: "No se pudieron guardar los cambios de RRHH",
+        description:
+          "Los datos no fueron modificados. Verifica tu conexión e intenta nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingRrhh(false);
+    }
+  };
+
   const handleUpdateProductPrice = async (payload: ProductPriceUpdate) => {
     if (!ledger || !activeWorkspace) return;
     const now = Date.now();
@@ -604,6 +649,113 @@ const loadLedger = useCallback(async () => {
       {
         title: "No se pudo guardar la disponibilidad en Cuentas y Productos",
         description: `${product.nombre} mantiene su cantidad anterior en ${warehouseName}. Intenta nuevamente desde el catalogo.`,
+      },
+    );
+  };
+
+  const handleUpsertTercero = async (payload: TerceroUpsert) => {
+    if (!ledger || !activeWorkspace) return;
+    const now = Date.now();
+    const iso = new Date(now).toISOString();
+    const sufijo = `${now}-${Math.random().toString(36).slice(2, 8)}`;
+    const registroTerceros = activeWorkspace.registro.terceros;
+    const existente = payload.id
+      ? registroTerceros.terceros.find((item) => item.id === payload.id)
+      : undefined;
+    const terceroId = existente?.id ?? `tercero-${sufijo}`;
+    const tercero: Tercero = {
+      id: terceroId,
+      nombre: payload.nombre,
+      tipoEntidad: payload.tipoEntidad,
+      telefono: payload.telefono,
+      correo: payload.correo,
+      direccion: payload.direccion,
+      identificadorFiscal: payload.identificadorFiscal,
+      numeroTarjeta: payload.numeroTarjeta,
+      direccionCrypto: existente?.direccionCrypto ?? "",
+      nota: payload.nota,
+      activo: existente?.activo ?? true,
+      createdAt: existente?.createdAt ?? iso,
+      updatedAt: iso,
+    };
+    const rolesPrevios = registroTerceros.roles
+      .filter((item) => item.terceroId === terceroId && item.activo)
+      .map((item) => item.rol);
+    const roles: TerceroRol[] = [
+      ...registroTerceros.roles.map((item) =>
+        item.terceroId === terceroId && !payload.roles.includes(item.rol)
+          ? { ...item, activo: false }
+          : item,
+      ),
+      ...payload.roles
+        .filter((rol) => !rolesPrevios.includes(rol))
+        .map(
+          (rol): TerceroRol => ({
+            id: `rol-${terceroId}-${rol}-${sufijo}`,
+            terceroId,
+            rol,
+            activo: true,
+            createdAt: iso,
+          }),
+        ),
+    ];
+    const terceros = existente
+      ? registroTerceros.terceros.map((item) => (item.id === terceroId ? tercero : item))
+      : [...registroTerceros.terceros, tercero];
+    const updatedWorkspaces = ledger.workspaces.map((workspace) =>
+      workspace.id !== activeWorkspace.id
+        ? workspace
+        : {
+            ...workspace,
+            registro: {
+              ...workspace.registro,
+              terceros: { ...registroTerceros, terceros, roles },
+            },
+          },
+    );
+    await persistProductLedger(
+      { ...ledger, workspaces: updatedWorkspaces },
+      {
+        title: existente ? "Tercero actualizado" : "Tercero creado",
+        description: `${tercero.nombre} quedó guardado en este espacio.`,
+      },
+      {
+        title: "No se pudo guardar el tercero",
+        description: `${tercero.nombre} mantiene sus datos anteriores. Intenta nuevamente.`,
+      },
+    );
+  };
+
+  const handleSetTerceroActivo = async (terceroId: string, activo: boolean) => {
+    if (!ledger || !activeWorkspace) return;
+    const registroTerceros = activeWorkspace.registro.terceros;
+    const tercero = registroTerceros.terceros.find((item) => item.id === terceroId);
+    if (!tercero) return;
+    const updatedWorkspaces = ledger.workspaces.map((workspace) =>
+      workspace.id !== activeWorkspace.id
+        ? workspace
+        : {
+            ...workspace,
+            registro: {
+              ...workspace.registro,
+              terceros: {
+                ...registroTerceros,
+                terceros: registroTerceros.terceros.map((item) =>
+                  item.id === terceroId ? { ...item, activo, updatedAt: new Date().toISOString() } : item,
+                ),
+              },
+            },
+          },
+    );
+    await persistProductLedger(
+      { ...ledger, workspaces: updatedWorkspaces },
+      {
+        title: activo ? "Tercero activado" : "Tercero desactivado",
+        description: `${tercero.nombre} ${activo ? "vuelve a estar disponible." : "se ocultó del directorio (su historial se conserva)."}`,
+      },
+      {
+        title: "No se pudo cambiar el estado",
+        description: `${tercero.nombre} mantiene su estado anterior. Intenta nuevamente.`,
       },
     );
   };
@@ -944,7 +1096,14 @@ const handleCreateMovimiento = async (payload: {
           />
         );
       case "terceros":
-        return <TercerosView workspace={activeWorkspace} />;
+        return (
+          <TercerosView
+            workspace={activeWorkspace}
+            saving={savingProductChanges}
+            onUpsertTercero={handleUpsertTercero}
+            onSetTerceroActivo={handleSetTerceroActivo}
+          />
+        );
       case "catalogos":
         return (
           <CatalogosView
@@ -956,15 +1115,31 @@ const handleCreateMovimiento = async (payload: {
             onUpdateProductStock={handleUpdateProductStock}
           />
         );
+      case "rrhh":
+        return (
+          <RrhhView
+            rrhh={activeWorkspace.rrhh}
+            nombreEmpresa={activeWorkspace.name ?? ""}
+            saving={savingRrhh}
+            onSave={handleSaveRrhh}
+          />
+        );
       case "nomencladores":
         return <NomenclatorsView />;
       case "respaldo":
         return (
-          <BackupView
-            onReload={loadLedger}
-            onDownloadBackup={handleDownloadBackup}
-            canDownload={Boolean(ledger)}
-          />
+          <div className="space-y-4">
+            <BackupView
+              onReload={loadLedger}
+              onDownloadBackup={handleDownloadBackup}
+              canDownload={Boolean(ledger)}
+              onChangeMode={() => {
+                resetStartup();
+                navigate("/inicio");
+              }}
+            />
+            <VincularLanCard onImportado={loadLedger} />
+          </div>
         );
       case "documentos":
       case "seguridad":
@@ -1002,6 +1177,10 @@ const handleCreateMovimiento = async (payload: {
             onReload={loadLedger}
             onDownloadBackup={handleDownloadBackup}
             canDownload={false}
+            onChangeMode={() => {
+              resetStartup();
+              navigate("/inicio");
+            }}
           />
         </div>
       </div>

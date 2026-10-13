@@ -26,15 +26,17 @@ import VerifyEmail from "./pages/VerifyEmail.tsx";
 import ResetPassword from "./pages/ResetPassword.tsx";
 import AccountingWorkspace from "./accounting/AccountingWorkspace.tsx";
 import GC_TCP from "./gctcp/GC_TCP.tsx";
+import StartModeScreen from "./screens/StartModeScreen.tsx";
 
 // biome-ignore lint/style/noNonNullAssertion: <explanation>
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
 		<ThemeProvider>
-			<ElectronWrapper>
-				<AppRouter>
+			<AppRouter>
+				<ElectronWrapper>
 					<Routes>
 						<Route path="/" element={<App />} />
+						<Route path="/inicio" element={<StartModeScreen />} />
 						<Route path="/login" element={<Auth />} />
 						<Route path="/print" element={<Print />} />
 						<Route path="/dev" element={<DevPreview />} />
@@ -60,8 +62,8 @@ createRoot(document.getElementById("root")!).render(
 						<Route path="/tcp-registro2/:documentId" element={<TcpIncomeExpenseRegisterPage />} />
 						<Route path="/*" element={<PageNotFound/>} />
 					</Routes>
-				</AppRouter>
-			</ElectronWrapper>
+				</ElectronWrapper>
+			</AppRouter>
 		</ThemeProvider>
 		<Toaster />
 		<SonnerToaster />

@@ -72,35 +72,21 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
   const tier = license?.payload?.tier ?? null;
 
   // ── Verificar licencia al montar ───────────────────────────────────────────
+  // NOTA (2026-10): flujo de compra/activación en pausa por decisión de producto.
+  // Se conserva todo el código de licencias para el futuro, pero no bloquea el inicio.
   useEffect(() => {
     async function init() {
-      // En la web (sin electronAPI): no hace falta licencia, pasar directo
-      if (!window.electronAPI) {
-        setIsLoading(false);
-        return;
-      }
-
       try {
-        // Restaurar cuenta local guardada
+        // Restaurar cuenta local guardada (sigue útil para modos backup/teléfono)
         const savedAccount = localStorage.getItem("sysgd_local_account");
         if (savedAccount) {
           setLocalAccountState(JSON.parse(savedAccount));
         }
-
-        // Verificar licencia guardada en disco (100% offline, firma RSA)
-        const result = await window.electronAPI.checkLicense();
-
-        if (result.valid && result.payload) {
-          setLicense({ payload: result.payload, activatedAt: null });
-          setSetupStep("complete");
-        } else {
-          // Expirada o no existe
-          setSetupStep("welcome");
-        }
       } catch (error) {
-        console.error("Error checking license:", error);
-        setSetupStep("welcome");
+        console.error("Error restaurando cuenta local:", error);
       } finally {
+        // Sin bloqueo por licencia: siempre completo hasta reactivar el flujo.
+        setSetupStep("complete");
         setIsLoading(false);
       }
     }

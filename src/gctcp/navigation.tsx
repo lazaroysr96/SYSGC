@@ -3,6 +3,7 @@ import {
 	Blocks,
 	BookOpen,
 	CircleHelp,
+	ContactRound,
 	CreditCard,
 	HandCoins,
 	DatabaseBackup,
@@ -51,6 +52,10 @@ export const navigationSections: NavigationSection[] = [
 	{
 		title: "Catalogo",
 		items: [{ id: "catalogos", label: "Cuentas y Productos", icon: <Blocks /> }],
+	},
+	{
+		title: "Recursos Humanos",
+		items: [{ id: "rrhh", label: "RRHH", icon: <ContactRound /> }],
 	},
 	{
 		title: "Cuenta y plataforma",

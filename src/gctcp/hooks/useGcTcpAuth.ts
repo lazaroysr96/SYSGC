@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useAuthSession } from "@/hooks/connection/useAuthSession";
+import { readStartMode } from "@/contexts/StartupContext";
 import { isDesktopMode } from "../data/getLedgerRepository";
 import type { User } from "@/types/user";
 
@@ -39,14 +40,13 @@ function buildLocalUser(name: string, email: string): User {
 	};
 }
 
-let gctcpAuthRenderCount = 0;
-
 /**
  * Provee la sesión de usuario para el módulo GCTCP.
  *
- * - Modo escritorio (Electron): no requiere sesión de servidor. Se construye un
- *   usuario local desde `sysgd_local_account` (creado en SetupAccountScreen), por
- *   lo que la app funciona 100% offline.
+ * - Modo escritorio + nube: delega en la sesión del servidor (cuenta SYSGD).
+ *   El trabajo online usa la nube y la salvaguarda local + SyncManager cubre
+ *   la pérdida de conexión y el trabajo offline posterior.
+ * - Modo escritorio + backup/teléfono (o sin modo): usuario local 100% offline.
  * - Modo web: delega en la sesión remota habitual (useAuthSession).
  */
 export function useGcTcpAuth(): {
@@ -56,6 +56,7 @@ export function useGcTcpAuth(): {
 } {
 	const desktopMode = isDesktopMode();
 	const remote = useAuthSession();
+	const startMode = desktopMode ? readStartMode() : null;
 
 	let localAccount: { name: string; email: string } | null = null;
 	try {
@@ -65,22 +66,21 @@ export function useGcTcpAuth(): {
 		localAccount = null;
 	}
 
-	const user = useMemo(() => {
-		if (!desktopMode) return remote.user;
-
-		gctcpAuthRenderCount++;
-		console.log(
-			`[useGcTcpAuth] building local user #${gctcpAuthRenderCount}`,
-			localAccount?.email,
-		);
+	const localUser = useMemo(() => {
 		return localAccount
 			? buildLocalUser(localAccount.name, localAccount.email)
 			: buildLocalUser("Usuario Local", "local@sysgc.local");
-	}, [desktopMode, remote.user, localAccount?.email, localAccount?.name]);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [localAccount?.email, localAccount?.name]);
 
-	return {
-		user,
-		loading: desktopMode ? false : remote.loading,
-		desktopMode,
-	};
+	if (!desktopMode) {
+		return { user: remote.user, loading: remote.loading, desktopMode };
+	}
+
+	// En escritorio, el modo nube exige sesión del servidor.
+	if (startMode === "cloud") {
+		return { user: remote.user, loading: remote.loading, desktopMode };
+	}
+
+	return { user: localUser, loading: false, desktopMode };
 }

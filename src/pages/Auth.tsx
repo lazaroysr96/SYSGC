@@ -77,7 +77,7 @@ const Auth: FC = () => {
 		if (token) {
 			localStorage.setItem("token", token);
 			window.history.replaceState({}, document.title, window.location.pathname);
-			router("/dashboard");
+			router(window.electronAPI ? "/gctcp" : "/dashboard");
 			return;
 		}
 
@@ -121,7 +121,7 @@ const Auth: FC = () => {
 
 	useEffect(() => {
 		if (authUser) {
-			router("/dashboard");
+			router(window.electronAPI ? "/gctcp" : "/dashboard");
 		}
 	}, [authUser, router]);
 
@@ -149,7 +149,7 @@ const Auth: FC = () => {
 			}
 
 			if (!cancelled) {
-				router("/dashboard");
+				router(window.electronAPI ? "/gctcp" : "/dashboard");
 			}
 		};
 
@@ -170,7 +170,7 @@ const Auth: FC = () => {
 
 		const token = localStorage.getItem("token");
 		if (token) {
-			router("/dashboard");
+			router(window.electronAPI ? "/gctcp" : "/dashboard");
 			return;
 		}
 
@@ -261,7 +261,7 @@ const Auth: FC = () => {
 						}
 					}
 
-					router("/dashboard");
+					router(window.electronAPI ? "/gctcp" : "/dashboard");
 				}
 			} catch {
 				alert("Error al completar el registro");

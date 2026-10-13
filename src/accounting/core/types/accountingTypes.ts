@@ -373,6 +373,129 @@ export type CloudWorkspaceEntry = {
   name: string;
   registro: RegistroTCP;
   accounting: AccountingWorkspaceState;
+  /**
+   * Datos de Recursos Humanos (RRHH) de este espacio. Espejo del módulo RRHH
+   * de la app móvil (Android): mismo JSON en la nube, misma estructura de
+   * campos. Opcional por compatibilidad con workspaces creados sin RRHH.
+   */
+  rrhh?: RrhhBackupData | null;
+};
+
+// ── RRHH (Recursos Humanos) ────────────────────────────────────────────────
+// Espejo del módulo RRHH de la app móvil (SYSGD Cont). Estas estructuras
+// viajan dentro del workspace del contenedor `api/cont-ledger`, de modo que
+// PC (web/escritorio) y teléfono comparten exactamente los mismos datos.
+
+export type CategoriaOcupacional =
+  | "SERVICIOS"
+  | "ADMINISTRATIVO"
+  | "OPERARIO"
+  | "TECNICO"
+  | "CUADRO";
+
+export type TipoContrato = "INDEFINIDO" | "DETERMINADO" | "EVENTUAL";
+
+export type EstadoTrabajador =
+  | "ACTIVO"
+  | "BAJA_TEMPORAL"
+  | "BAJA_DEFINITIVA";
+
+export type ModoTrabajo = "TASA" | "HORAS";
+
+export type FormaPago = "EFECTIVO" | "TARJETA";
+
+export type Cargo = {
+  id: string;
+  nombre: string;
+  categoriaOcupacional: CategoriaOcupacional;
+  grupoEscala: number;
+  salarioBase: number;
+  descripcion: string;
+};
+
+export type Trabajador = {
+  id: string;
+  /** Nº de expediente/identificación del trabajador (columna ID del SC-4-05). */
+  idTrabajador: string;
+  nombre: string;
+  apellidos: string;
+  carnetIdentidad: string;
+  tarjeta: string;
+  cargoId: string;
+  /** Epoch millis. */
+  fechaIngreso: number;
+  tipoContrato: TipoContrato;
+  fechaVencimientoContrato: number | null;
+  lugarTrabajo: string;
+  horario: string;
+  estado: EstadoTrabajador;
+  notas: string;
+  /** Cómo se le paga: tarjeta o efectivo. */
+  formaPago: FormaPago;
+  /** Cómo se calcula su salario: tasa mensual (190,6 h) u horas exactas. */
+  modoTrabajo: ModoTrabajo;
+};
+
+export type FuncionTrabajador = {
+  id: string;
+  trabajadorId: string;
+  descripcion: string;
+  orden: number;
+  asignadaPor: string;
+  origenFuncionCargoId: string | null;
+};
+
+export type FuncionCargo = {
+  id: string;
+  cargoId: string;
+  descripcion: string;
+  orden: number;
+};
+
+export type ConceptoDescuento = {
+  id: string;
+  nombre: string;
+  /** null = este concepto siempre se introduce manual, sin sugerencia de %. */
+  porcentaje: number | null;
+  /** Si no está activo, no se ofrece al confeccionar un pago nuevo. */
+  activo: boolean;
+  notas: string;
+};
+
+export type DescuentoAplicado = {
+  conceptoId: string;
+  nombre: string;
+  monto: number;
+  esManual: boolean;
+};
+
+export type PagoNomina = {
+  id: string;
+  trabajadorId: string;
+  /** 1..12 */
+  mes: number;
+  anio: number;
+  salarioBase: number;
+  pagosAdicionales: number;
+  descuentos: DescuentoAplicado[];
+  /** null = confeccionado pero aún no pagado. */
+  fechaPago: number | null;
+  metodoPago: string;
+  notas: string;
+  diasTrabajados: number;
+  diasPeriodo: number;
+  monedaPago: string | null;
+  montoPagado: number | null;
+  movimientoCajaId: string | null;
+};
+
+export type RrhhBackupData = {
+  trabajadores: Trabajador[];
+  cargos: Cargo[];
+  funcionesTrabajador: FuncionTrabajador[];
+  funcionesCargo: FuncionCargo[];
+  conceptosDescuento: ConceptoDescuento[];
+  pagosNomina: PagoNomina[];
 };
 
 export type CloudLedgerContainer = {

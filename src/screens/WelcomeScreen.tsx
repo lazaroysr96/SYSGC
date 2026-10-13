@@ -1,18 +1,46 @@
-import { Building2, LogIn, UserPlus } from "lucide-react";
+import { Building2, Link2, LogIn, UserPlus } from "lucide-react";
+import { useState } from "react";
 import { useLicense } from "@/contexts/LicenseContext";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import { IoExit } from "react-icons/io5";
 import useDatabase from "@/hooks/electron/useDatabase";
+import { VincularLanDialog, type VinculoLanDatos } from "../gctcp/vinculolan/VincularLan";
+import { getLedgerRepository } from "../gctcp/data/getLedgerRepository";
 
 export default function WelcomeScreen() {
-	const { setSetupStep, hasAccount } = useLicense();
+	const { setSetupStep, setLocalAccount, hasAccount } = useLicense();
+	const { toast } = useToast();
+	const [vinculando, setVinculando] = useState(false);
+	const [importando, setImportando] = useState(false);
 	if (window.electronAPI) {
-		
+
 		// alert("database")
 		// eslint-disable-next-line react-hooks/rules-of-hooks
 		useDatabase()
       }
-	
+
+	const importarVinculo = async (datos: VinculoLanDatos): Promise<void> => {
+		setImportando(true);
+		try {
+			await getLedgerRepository().saveLedger(datos.ledger, null);
+			if (datos.perfil.nombre || datos.perfil.correo) {
+				setLocalAccount({
+					name: datos.perfil.nombre || "Usuario del teléfono",
+					email: datos.perfil.correo,
+				});
+			}
+			setSetupStep("complete");
+		} catch {
+			toast({
+				title: "No se pudo vincular",
+				description: "Revisa el link e intenta de nuevo.",
+				variant: "destructive",
+			});
+		} finally {
+			setImportando(false);
+		}
+	};
 
 	return (
 		<div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4">
@@ -64,6 +92,15 @@ export default function WelcomeScreen() {
 						</Button>
 					)}
 					<Button
+						onClick={() => setVinculando(true)}
+						variant="outline"
+						disabled={importando}
+						className="w-full h-12 text-lg border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/10"
+					>
+						<Link2 className="w-5 h-5 mr-2" />
+						{importando ? "Importando…" : "Vincular con un dispositivo"}
+					</Button>
+					<Button
 						onClick={() => window.electronAPI?.close()}
 						className="w-full h-14 text-lg bg-linear-to-r from-red-700 to-red-900 hover:from-red-600 hover:to-red-700 text-white"
 					>
@@ -72,6 +109,14 @@ export default function WelcomeScreen() {
 					</Button>
 				</div>
 			</div>
+			<VincularLanDialog
+				open={vinculando}
+				onOpenChange={setVinculando}
+				tituloConfirmar="Importar y entrar"
+				onDatos={(datos) => {
+					void importarVinculo(datos);
+				}}
+			/>
 		</div>
 	);
 }
