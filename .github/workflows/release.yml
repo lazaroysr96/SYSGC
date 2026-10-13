@@ -172,6 +172,39 @@ jobs:
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
+  build-ios:
+    # Solo verifica que compila para iOS (simulador, sin firmar).
+    # Distribuir en iPhones requiere cuenta Apple Developer + certificados.
+    runs-on: macos-latest
+    env:
+      VITE_SERVER_URL: https://sysgd-production.up.railway.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Instalar dependencias (web)
+        run: npm ci
+
+      - name: Build web + sync Capacitor
+        run: |
+          npm run build
+          npx cap sync ios
+
+      - name: Instalar Pods
+        working-directory: ios/App
+        run: pod install
+
+      - name: Compilar para simulador
+        run: >
+          xcodebuild -workspace ios/App/App.xcworkspace
+          -scheme App -configuration Debug
+          -sdk iphonesimulator -derivedDataPath /tmp/dd build
+
   publish:
     needs: [build-win, build-linux, build-android, build-android-release]
     # El job de release puede omitirse (sin secrets): no debe bloquear.
