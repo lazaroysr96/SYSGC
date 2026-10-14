@@ -3,7 +3,6 @@ import type {
 	CloudLedgerContainer,
 	InventarioRegistro,
 } from "../../accounting/core/types/accountingTypes";
-import type { LedgerApiResponse } from "../types";
 import type { LedgerRepository } from "./LedgerRepository";
 import { LocalLedgerRepository } from "./LocalLedgerRepository";
 import { RemoteLedgerRepository } from "./RemoteLedgerRepository";
@@ -43,74 +42,58 @@ export class SyncManager {
 	}
 
 	/**
-	 * Ejecuta la sincronización completa (pull + push).
-	 * 1. Si no hay sesión de servidor → no-session.
-	 * 2. Pull: trae el remoto; si es más nuevo que el local, lo aplica local.
-	 * 3. Push: si el local es más nuevo (o el remoto no existe), lo sube.
+	 * Ejecuta la sincronización completa (push + pull).
+	 * 
+	 * Orden: push primero para no perder cambios locales (p. ej. subidos por
+	 * otro dispositivo como el teléfono), luego pull para traer cambios remotos.
+	 * El servidor resuelve conflictos por last-write-wins basado en updatedAt.
 	 */
 	async sync(): Promise<SyncResult> {
 		if (!this.hasServerSession()) {
 			return { state: "no-session" };
 		}
 
-		let remote: LedgerApiResponse | null = null;
-
 		try {
-			// ── PULL ─────────────────────────────────────────────────────────
-			remote = await this.remote.loadLedger();
-		} catch {
-			// Sin conexión / servidor inaccesible
-			return { state: "offline" };
-		}
-
-		try {
+			// ── PUSH ─────────────────────────────────────────────────────────
+			// Subir cambios locales primero para evitar pérdidas si otro
+			// dispositivo (teléfono) actualizó la nube después del último pull.
 			const local = await this.local.loadLedger();
+			const registro = local.registro ?? {
+				activeWorkspaceId: "",
+				workspaces: [],
+			};
+			await this.remote.saveLedger(
+				registro,
+				local.inventarioRegistro ?? null,
+			);
+
+			// ── PULL ─────────────────────────────────────────────────────────
+			// Traer datos remotos (pueden incluir cambios del teléfono)
+			const remote = await this.remote.loadLedger();
 
 			const remoteTime = remote.updatedAt
 				? new Date(remote.updatedAt).getTime()
 				: 0;
-			const localTime = local.updatedAt
-				? new Date(local.updatedAt).getTime()
-				: 0;
 
-			if (remote.registro && remoteTime > localTime) {
-				// El remoto es más nuevo → aplicarlo localmente
+			if (remote.registro && remoteTime > 0) {
 				await this.local.saveLedger(
 					remote.registro,
 					remote.inventarioRegistro ?? null,
 				);
 				return {
 					state: "synced",
-					message: "Datos actualizados desde la nube",
+					message: "Sincronizado con la nube",
 					updatedAt: remote.updatedAt,
 				};
 			}
 
-			if (localTime > remoteTime || !remote.registro) {
-				// El local es más nuevo (o no hay remoto) → subirlo
-				const registro = local.registro ?? {
-					activeWorkspaceId: "",
-					workspaces: [],
-				};
-				await this.remote.saveLedger(
-					registro,
-					local.inventarioRegistro ?? null,
-				);
-				return {
-					state: "synced",
-					message: "Datos subidos a la nube",
-					updatedAt: local.updatedAt,
-				};
-			}
-
-			// Iguales → ya sincronizados
 			return {
 				state: "synced",
-				message: "Todo sincronizado",
+				message: "Datos subidos a la nube",
 				updatedAt: local.updatedAt,
 			};
 		} catch {
-			return { state: "error" };
+			return { state: "offline" };
 		}
 	}
 
