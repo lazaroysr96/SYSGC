@@ -9,6 +9,7 @@ interface UseSyncManagerReturn {
 	lastSync: string | null;
 	message: string | null;
 	runSync: () => Promise<SyncResult>;
+	resolveConflict: (choice: "local" | "remote") => Promise<SyncResult>;
 	isDesktop: boolean;
 }
 
@@ -55,5 +56,23 @@ export function useSyncManager(isDesktop: boolean): UseSyncManagerReturn {
 		return () => clearInterval(interval);
 	}, [isDesktop, runSync]);
 
-	return { state, lastSync, message, runSync, isDesktop };
+	const resolveConflict = useCallback(
+		async (choice: "local" | "remote"): Promise<SyncResult> => {
+			if (!isDesktop) return { state: "no-session" };
+			inFlight.current = true;
+			setState("syncing");
+			try {
+				const result = await getManager().resolveConflict(choice);
+				setState(result.state);
+				setMessage(result.message ?? null);
+				if (result.updatedAt) setLastSync(result.updatedAt);
+				return result;
+			} finally {
+				inFlight.current = false;
+			}
+		},
+		[isDesktop, getManager],
+	);
+
+	return { state, lastSync, message, runSync, resolveConflict, isDesktop };
 }

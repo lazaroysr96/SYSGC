@@ -7,6 +7,11 @@ import type { LedgerApiResponse } from "../types";
 import type { LedgerRepository } from "./LedgerRepository";
 
 export class RemoteLedgerRepository implements LedgerRepository {
+	async getVersion(): Promise<string | null> {
+		const { data } = await api.get<{ updatedAt: string | null }>("/api/cont-ledger/version");
+		return data.updatedAt;
+	}
+
 	async loadLedger(): Promise<LedgerApiResponse> {
 		const { data } = await api.get<LedgerApiResponse>("/api/cont-ledger");
 		return data;

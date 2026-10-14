@@ -6,6 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -72,6 +79,7 @@ const syncStateLabel: Record<SyncState, { label: string; tone: "ok" | "warn" | "
   synced: { label: "Sincronizado", tone: "ok" },
   offline: { label: "Sin conexión", tone: "err" },
   "no-session": { label: "Inicia sesión para sincronizar", tone: "warn" },
+  conflict: { label: "Conflicto de sincronización", tone: "err" },
   error: { label: "Error de sincronización", tone: "err" },
 };
 
@@ -104,7 +112,14 @@ const GC_TCP: FC = () => {
     state: syncState,
     message: syncMessage,
     runSync,
+    resolveConflict,
   } = useSyncManager(desktopMode);
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [conflictResolving, setConflictResolving] = useState(false);
+
+  useEffect(() => {
+    if (syncState === "conflict") setConflictOpen(true);
+  }, [syncState]);
   const [loadingLedger, setLoadingLedger] = useState(true);
   const [data, setData] = useState<LedgerApiResponse | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>("");
@@ -1395,6 +1410,55 @@ const handleCreateMovimiento = async (payload: {
         </header>
         <div className="p-4 sm:p-6">{renderContent()}</div>
       </main>
+
+      <Dialog open={conflictOpen} onOpenChange={setConflictOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Conflicto de sincronización</DialogTitle>
+            <DialogDescription>
+              La nube tiene datos nuevos que no están en este equipo
+              (posiblemente subidos desde el teléfono). ¿Qué quieres hacer?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Button
+              type="button"
+              className="w-full"
+              disabled={conflictResolving}
+              onClick={() => {
+                setConflictResolving(true);
+                void resolveConflict("local").then((result) => {
+                  setConflictResolving(false);
+                  if (result.state === "synced") setConflictOpen(false);
+                });
+              }}
+            >
+              Subir mis datos (sobrescribe la nube)
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={conflictResolving}
+              onClick={() => {
+                setConflictResolving(true);
+                void resolveConflict("remote").then((result) => {
+                  setConflictResolving(false);
+                  if (result.state === "synced") {
+                    setConflictOpen(false);
+                    void loadLedger();
+                  }
+                });
+              }}
+            >
+              Usar datos de la nube (sobrescribe este equipo)
+            </Button>
+          </div>
+          {conflictResolving && (
+            <p className="text-center text-sm text-slate-500">Resolviendo…</p>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
