@@ -173,8 +173,9 @@ jobs:
           if-no-files-found: error
 
   build-ios:
-    # Solo verifica que compila para iOS (simulador, sin firmar).
-    # Distribuir en iPhones requiere cuenta Apple Developer + certificados.
+    # Genera un IPA SIN FIRMAR para sideloading (Sideloadly/AltStore/3uTools
+    # desde PC: ellos lo re-firman con el Apple ID del usuario).
+    # No bloquea el Release principal si falla.
     runs-on: macos-latest
     env:
       VITE_SERVER_URL: https://sysgd-production.up.railway.app
@@ -199,11 +200,44 @@ jobs:
         working-directory: ios/App
         run: pod install
 
-      - name: Compilar para simulador
+      - name: Compilar .app sin firmar
         run: >
           xcodebuild -workspace ios/App/App.xcworkspace
-          -scheme App -configuration Debug
-          -sdk iphonesimulator -derivedDataPath /tmp/dd build
+          -scheme App -configuration Release
+          -sdk iphoneos -derivedDataPath /tmp/dd build
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Empaquetar IPA sin firmar
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          APP_PATH=$(find /tmp/dd -name "App.app" -path "*Release-iphoneos*" | head -1)
+          test -n "$APP_PATH"
+          rm -rf Payload && mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          zip -r "GCTCP-${TAG}-unsigned.ipa" Payload
+
+      - name: Subir artefacto iOS
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: GCTCP-*.ipa
+          if-no-files-found: error
+
+  publish-ios:
+    needs: [build-ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-ipa
+          path: artifacts-ios
+
+      - name: Adjuntar IPA al Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts-ios/*.ipa
+          generate_release_notes: false
 
   publish:
     needs: [build-win, build-linux, build-android, build-android-release]
