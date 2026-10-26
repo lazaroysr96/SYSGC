@@ -176,3 +176,4 @@ vite.config.ts.timestamp-*
 server/assets/database.db-shm
 server/assets/database.db-wal
 .codex
+sysgd-cont-backup-2026-10-15.json

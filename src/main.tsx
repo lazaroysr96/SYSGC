@@ -4,6 +4,7 @@ import { Route, Routes } from "react-router-dom";
 import { Toaster as SonnerToaster } from "sonner";
 import { ElectronWrapper } from "@/components/ElectronWrapper";
 import { ThemeProvider } from "@/contexts/theme-context";
+import { ServerProvider } from "@/contexts/ServerContext";
 import AppRouter from "./AppRouter.tsx";
 import ProjectsPage from "./components/DashboardPage.tsx";
 import { Toaster } from "./components/ui/toaster.tsx";
@@ -32,9 +33,10 @@ import StartModeScreen from "./screens/StartModeScreen.tsx";
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
 		<ThemeProvider>
-			<AppRouter>
-				<ElectronWrapper>
-					<Routes>
+			<ServerProvider>
+				<AppRouter>
+					<ElectronWrapper>
+						<Routes>
 						<Route path="/" element={<App />} />
 						<Route path="/inicio" element={<StartModeScreen />} />
 						<Route path="/login" element={<Auth />} />
@@ -49,6 +51,7 @@ createRoot(document.getElementById("root")!).render(
 						
 						<Route path="/help" element={<Help />} />
 						<Route path="/settings" element={<SettingsPage />} />
+						<Route path="/settings/server" element={<SettingsPage />} />
 						<Route path="/settings/tokens" element={<TokenManagement />} />
 						<Route path="/verify-email" element={<VerifyEmail />} />
 						<Route path="/reset-password" element={<ResetPassword />} />
@@ -63,7 +66,8 @@ createRoot(document.getElementById("root")!).render(
 						<Route path="/*" element={<PageNotFound/>} />
 					</Routes>
 				</ElectronWrapper>
-			</AppRouter>
+				</AppRouter>
+			</ServerProvider>
 		</ThemeProvider>
 		<Toaster />
 		<SonnerToaster />

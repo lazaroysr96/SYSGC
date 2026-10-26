@@ -243,16 +243,26 @@ const ErrorServer: React.FC<ErrorServerProps> = ({
 							</Button>
 						</div>
 
-						{/* Navigation Options */}
-						<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-							<Button
-								onClick={goHome}
-								variant="ghost"
-								className="text-slate-300 hover:text-white hover:bg-slate-700 h-10"
-							>
-								<Home className="w-4 h-4 mr-2" />
-								Ir al inicio
-							</Button>
+					{/* Change Server */}
+					<Button
+						onClick={() => navigate("/settings/server")}
+						variant="outline"
+						className="w-full border-amber-500/50 text-amber-300 hover:bg-amber-500/10 h-11"
+					>
+						<Server className="w-4 h-4 mr-2" />
+						Cambiar servidor
+					</Button>
+
+					{/* Navigation Options */}
+					<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+						<Button
+							onClick={goHome}
+							variant="ghost"
+							className="text-slate-300 hover:text-white hover:bg-slate-700 h-10"
+						>
+							<Home className="w-4 h-4 mr-2" />
+							Ir al inicio
+						</Button>
 
 							<Button
 								onClick={goBack}

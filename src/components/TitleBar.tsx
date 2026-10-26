@@ -1,9 +1,13 @@
-import { ArrowLeft, ArrowRight, Minus, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Minus, Server, Square, X } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
+import { useServer } from "@/contexts/ServerContext";
+import ServerSettingsDialog from "@/components/ServerSettingsDialog";
 
 export const TitleBar: React.FC = () => {
 	const [isMaximized, setIsMaximized] = useState(false);
+	const [serverDialogOpen, setServerDialogOpen] = useState(false);
+	const { serverUrl, activeAccount } = useServer();
 
 	useEffect(() => {
 		const checkMaximized = async () => {
@@ -98,6 +102,19 @@ export const TitleBar: React.FC = () => {
 				</span>
 			</div>
 
+			{/* Botón de servidor */}
+			<button
+				type="button"
+				onClick={() => setServerDialogOpen(true)}
+				className="h-10 flex items-center gap-1 px-2 text-sky-700 hover:text-sky-900 hover:bg-sky-200/60 dark:text-indigo-300 dark:hover:text-white dark:hover:bg-indigo-500/20 transition-all duration-150 no-drag-region"
+				title={activeAccount ? `${activeAccount.name} — ${serverUrl}` : serverUrl}
+			>
+				<Server className="size-3.5" />
+				<span className="hidden sm:inline text-xs font-medium max-w-32 truncate">
+					{activeAccount?.name || "Servidor"}
+				</span>
+			</button>
+
 			{/* Controles de ventana */}
 			<div className="flex no-drag-region">
 				<button
@@ -139,9 +156,14 @@ export const TitleBar: React.FC = () => {
 					"
 					title="Cerrar"
 				>
-					<X className="w-4 h-4" />
+						<X className="w-4 h-4" />
 				</button>
 			</div>
+
+			<ServerSettingsDialog
+				open={serverDialogOpen}
+				onOpenChange={setServerDialogOpen}
+			/>
 		</div>
 	);
 };

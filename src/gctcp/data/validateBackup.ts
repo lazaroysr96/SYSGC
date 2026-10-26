@@ -41,9 +41,20 @@ export function validateBackupText(text: string): BackupValidation {
 
 	if (!isRecord(parsed)) return { ok: false, msg: "Se esperaba un objeto JSON" };
 
-	// Acepta tanto el ledger directo como la respuesta completa del servidor ({ registro: {...} })
-	const inner: Record<string, unknown> =
-		"registro" in parsed && isRecord(parsed.registro) ? parsed.registro : parsed;
+	// Acepta múltiples formatos:
+	// 1. Ledger directo: { activeWorkspaceId, workspaces: [...] }
+	// 2. Respuesta del servidor: { registro: { activeWorkspaceId, workspaces: [...] } }
+	// 3. Respaldo del teléfono: { container: { activeWorkspaceId, workspaces: [...] } }
+	let inner: Record<string, unknown> = parsed;
+
+	if ("registro" in inner && isRecord(inner.registro)) {
+		inner = inner.registro as Record<string, unknown>;
+	} else if ("container" in inner && isRecord(inner.container)) {
+		const container = inner.container as Record<string, unknown>;
+		if ("workspaces" in container) {
+			inner = container;
+		}
+	}
 
 	const missing = REQUIRED_KEYS.filter((k) => !(k in inner));
 	if (missing.length) return { ok: false, msg: `Faltan campos requeridos: ${missing.join(", ")}` };
