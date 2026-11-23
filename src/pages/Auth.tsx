@@ -14,11 +14,27 @@ import LoadingLogo from "@/components/LoadingLogo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useServer } from "@/contexts/ServerContext";
 import { useAuthSession } from "@/hooks/connection/useAuthSession";
 import { useCheckUser } from "@/hooks/connection/useCheckUser";
 import { useLogin } from "@/hooks/connection/useLogin";
 import { useRegisterUser } from "@/hooks/connection/useRegisterUser";
 import useServerStatus from "@/hooks/connection/useServerStatus";
+
+interface InvitationData {
+	email: string;
+	senderName?: string;
+	projectName?: string;
+}
+
+interface VerifyInvitationResponse {
+	valid?: boolean;
+	invitation?: InvitationData;
+	error?: string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null;
 
 const Auth: FC = () => {
 	const SUPPORT_WHATSAPP = "+5351158544";
@@ -31,7 +47,7 @@ const Auth: FC = () => {
 	const [confirmPassword, setConfirmPassword] = useState("");
 	const [twoFactorCode, setTwoFactorCode] = useState("");
 	const [invitationToken, setInvitationToken] = useState<string | null>(null);
-	const [invitationData, setInvitationData] = useState<any>(null);
+	const [invitationData, setInvitationData] = useState<InvitationData | null>(null);
 	const [forgotLoading, setForgotLoading] = useState(false);
 	const [forgotMessage, setForgotMessage] = useState("");
 	const [forgotError, setForgotError] = useState("");
@@ -62,11 +78,13 @@ const Auth: FC = () => {
 		error: checkError,
 	} = useCheckUser();
 
-	const serverUrl = import.meta.env.VITE_SERVER_URL || "http://localhost:3000";
+	const { serverUrl } = useServer();
 	const { status, checkServerStatus } = useServerStatus(serverUrl);
 	const { user: authUser, loading: loadingAuthUser } = useAuthSession();
 
-	checkServerStatus();
+	useEffect(() => {
+		void checkServerStatus();
+	}, [checkServerStatus]);
 
 	useEffect(() => {
 		// 1. Verificar si venimos de un redireccionamiento de Google
@@ -87,13 +105,13 @@ const Auth: FC = () => {
 			// Verificar el token de invitación
 			fetch(`${serverUrl}/api/invitations/verify-token?token=${invToken}`)
 				.then((res) => res.json())
-				.then((data) => {
-					if (data.valid) {
-						setInvitationData(data.invitation);
-						setUser(data.invitation.email); // Pre-llenar el email
-						// Verificar si el usuario ya existe
-						checkUser(data.invitation.email);
-					} else {
+			.then((data: VerifyInvitationResponse) => {
+				if (data.valid && data.invitation) {
+					setInvitationData(data.invitation);
+					setUser(data.invitation.email); // Pre-llenar el email
+					// Verificar si el usuario ya existe
+					checkUser(data.invitation.email);
+				} else {
 						alert(data.error || "Token de invitación inválido");
 						window.history.replaceState(
 							{},
@@ -306,13 +324,24 @@ const Auth: FC = () => {
 				data?.message ||
 					"Si el correo está verificado, recibirás un enlace de recuperación.",
 			);
-		} catch (err: any) {
-			const backendError = err?.error || "No se pudo procesar la recuperación.";
-			const support = err?.support;
-			if (support?.whatsapp) {
+		} catch (err: unknown) {
+			const errorValue = isRecord(err) ? err.error : undefined;
+			const supportValue = isRecord(err) ? err.support : undefined;
+			const support = isRecord(supportValue) ? supportValue : undefined;
+			const supportWhatsapp =
+				typeof support?.whatsapp === "string" ? support.whatsapp : undefined;
+			const supportResponseTime =
+				typeof support?.responseTime === "string"
+					? support.responseTime
+					: undefined;
+			const backendError =
+				typeof errorValue === "string"
+					? errorValue
+					: "No se pudo procesar la recuperación.";
+			if (supportWhatsapp) {
 				setForgotError(
-					`${backendError} Soporte: ${support.whatsapp} (${
-						support.responseTime || "72h hábiles"
+					`${backendError} Soporte: ${supportWhatsapp} (${
+						supportResponseTime || "72h hábiles"
 					}).`,
 				);
 			} else {
@@ -949,7 +978,7 @@ const Auth: FC = () => {
 };
 
 const ButtonGoogle: FC = () => {
-	const serverUrl = import.meta.env.VITE_SERVER_URL || "http://localhost:3000";
+	const { serverUrl } = useServer();
 
 	return (
 		<button

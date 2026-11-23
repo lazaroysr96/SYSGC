@@ -4,6 +4,7 @@ import type {
 } from "../../accounting/core/types/accountingTypes";
 import type { LedgerApiResponse } from "../types";
 import type { LedgerRepository } from "./LedgerRepository";
+import { normalizeContainerForStorage } from "../accountingMath";
 
 const STORAGE_KEY = "sysgc_ledger_browser";
 
@@ -35,7 +36,7 @@ export class BrowserLedgerRepository implements LedgerRepository {
 				return { registro: EMPTY_LEDGER, inventarioRegistro: null, updatedAt: null };
 			}
 			return {
-				registro: parsed.registro as CloudLedgerContainer,
+				registro: normalizeContainerForStorage(parsed.registro as CloudLedgerContainer),
 				inventarioRegistro: (parsed.inventarioRegistro as InventarioRegistro | null) ?? null,
 				updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null,
 			};
@@ -53,7 +54,7 @@ export class BrowserLedgerRepository implements LedgerRepository {
 		inventarioRegistro: InventarioRegistro | null,
 	): Promise<void> {
 		const payload: LedgerApiResponse = {
-			registro,
+			registro: normalizeContainerForStorage(registro),
 			inventarioRegistro: inventarioRegistro ?? null,
 			updatedAt: new Date().toISOString(),
 		};

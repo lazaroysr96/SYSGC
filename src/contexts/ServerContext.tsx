@@ -6,6 +6,7 @@ import {
 	useState,
 	type ReactNode,
 } from "react";
+import { setApiBaseUrl } from "@/lib/api";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ function readServerUrl(): string {
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 export function ServerProvider({ children }: { children: ReactNode }) {
-	const [serverUrl, setServerUrlState] = useState<string>(DEFAULT_SERVER_URL);
+	const [serverUrl, setServerUrlState] = useState<string>(() => readServerUrl());
 	const [accounts, setAccounts] = useState<ServerAccount[]>([]);
 	const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
 
@@ -66,6 +67,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
 		const active = localStorage.getItem(ACTIVE_ACCOUNT_KEY);
 
 		setServerUrlState(url);
+		setApiBaseUrl(url);
 		setAccounts(accs);
 		if (active && accs.some((a) => a.id === active)) {
 			setActiveAccountId(active);
@@ -83,6 +85,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
 		(url: string) => {
 			const trimmed = url.trim();
 			setServerUrlState(trimmed);
+			setApiBaseUrl(trimmed);
 			localStorage.setItem(SERVER_URL_KEY, trimmed);
 		},
 	[]
@@ -96,6 +99,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
 			setActiveAccountId(accountId);
 			localStorage.setItem(ACTIVE_ACCOUNT_KEY, accountId);
 			setServerUrlState(account.serverUrl);
+			setApiBaseUrl(account.serverUrl);
 			localStorage.setItem(SERVER_URL_KEY, account.serverUrl);
 
 			// Actualizar último uso
@@ -119,6 +123,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
 			setActiveAccountId(newAccount.id);
 			localStorage.setItem(ACTIVE_ACCOUNT_KEY, newAccount.id);
 			setServerUrlState(newAccount.serverUrl);
+			setApiBaseUrl(newAccount.serverUrl);
 			localStorage.setItem(SERVER_URL_KEY, newAccount.serverUrl);
 		},
 		[accounts, persistAccounts]
@@ -135,10 +140,13 @@ export function ServerProvider({ children }: { children: ReactNode }) {
 					setActiveAccountId(next.id);
 					localStorage.setItem(ACTIVE_ACCOUNT_KEY, next.id);
 					setServerUrlState(next.serverUrl);
+					setApiBaseUrl(next.serverUrl);
 					localStorage.setItem(SERVER_URL_KEY, next.serverUrl);
 				} else {
 					setActiveAccountId(null);
 					localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+					setApiBaseUrl(DEFAULT_SERVER_URL);
+					localStorage.removeItem(SERVER_URL_KEY);
 				}
 			}
 		},

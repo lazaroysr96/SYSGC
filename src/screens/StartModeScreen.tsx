@@ -199,8 +199,8 @@ const StartModeScreen: FC = () => {
 					<StartModeCard
 						icon={<Cloud className="size-6" />}
 						title="Iniciar desde la nube"
-						description="Entra con tu cuenta SYSGD y trabaja conectado. Todo se guarda en la nube y queda una salvaguarda local: si se pierde la conexión sigues trabajando offline y se sincroniza después."
-						footer="Requiere internet para el primer inicio de sesión."
+						description="Entra con tu cuenta SYSGD. Al iniciar sesión se descarga tu base de datos de la nube y se establece en este equipo; después todo se guarda en la nube con salvaguarda local y sincronización."
+						footer="Requiere internet. En el primer inicio, la nube tiene prioridad sobre los datos locales de este equipo."
 					>
 						<Button type="button" className="w-full" onClick={handleCloud}>
 							Iniciar con cuenta SYSGD

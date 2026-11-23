@@ -8,6 +8,7 @@ interface UseSyncManagerReturn {
 	state: SyncState;
 	lastSync: string | null;
 	message: string | null;
+	dataVersion: number;
 	runSync: () => Promise<SyncResult>;
 	resolveConflict: (choice: "local" | "remote") => Promise<SyncResult>;
 	isDesktop: boolean;
@@ -19,12 +20,17 @@ interface UseSyncManagerReturn {
  *  - Corremos en modo escritorio (Electron)
  *  - El usuario inició sesión en el servidor (hay token)
  */
-export function useSyncManager(isDesktop: boolean): UseSyncManagerReturn {
+export function useSyncManager(
+	isDesktop: boolean,
+	cloudMode: boolean,
+): UseSyncManagerReturn {
 	const [state, setState] = useState<SyncState>("idle");
 	const [message, setMessage] = useState<string | null>(null);
 	const [lastSync, setLastSync] = useState<string | null>(null);
+	const [dataVersion, setDataVersion] = useState(0);
 	const managerRef = useRef<SyncManager | null>(null);
 	const inFlight = useRef<boolean>(false);
+	const shouldSync = isDesktop && cloudMode;
 
 	const getManager = useCallback(() => {
 		if (!managerRef.current) managerRef.current = new SyncManager();
@@ -32,33 +38,34 @@ export function useSyncManager(isDesktop: boolean): UseSyncManagerReturn {
 	}, []);
 
 	const runSync = useCallback(async (): Promise<SyncResult> => {
-		if (!isDesktop || inFlight.current) {
+		if (!shouldSync || inFlight.current) {
 			return { state: getManager().hasServerSession() ? "idle" : "no-session" };
 		}
 		inFlight.current = true;
 		setState("syncing");
 		try {
-			const result = await getManager().sync();
+			const result = await getManager().sync({ preferRemote: cloudMode });
 			setState(result.state);
 			setMessage(result.message ?? null);
 			if (result.updatedAt) setLastSync(result.updatedAt);
+			if (result.pulled) setDataVersion((version) => version + 1);
 			return result;
 		} finally {
 			inFlight.current = false;
 		}
-	}, [isDesktop, getManager]);
+	}, [shouldSync, cloudMode, getManager]);
 
 	// Primera sincronización al montar (si hay sesión) + sync periódico
 	useEffect(() => {
-		if (!isDesktop) return;
+		if (!shouldSync) return;
 		void runSync();
 		const interval = setInterval(() => void runSync(), SYNC_INTERVAL_MS);
 		return () => clearInterval(interval);
-	}, [isDesktop, runSync]);
+	}, [shouldSync, runSync]);
 
 	const resolveConflict = useCallback(
 		async (choice: "local" | "remote"): Promise<SyncResult> => {
-			if (!isDesktop) return { state: "no-session" };
+			if (!shouldSync) return { state: "no-session" };
 			inFlight.current = true;
 			setState("syncing");
 			try {
@@ -66,13 +73,22 @@ export function useSyncManager(isDesktop: boolean): UseSyncManagerReturn {
 				setState(result.state);
 				setMessage(result.message ?? null);
 				if (result.updatedAt) setLastSync(result.updatedAt);
+				if (result.pulled) setDataVersion((version) => version + 1);
 				return result;
 			} finally {
 				inFlight.current = false;
 			}
 		},
-		[isDesktop, getManager],
+		[shouldSync, getManager],
 	);
 
-	return { state, lastSync, message, runSync, resolveConflict, isDesktop };
+	return {
+		state,
+		lastSync,
+		message,
+		dataVersion,
+		runSync,
+		resolveConflict,
+		isDesktop,
+	};
 }

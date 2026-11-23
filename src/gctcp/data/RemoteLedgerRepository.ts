@@ -5,6 +5,7 @@ import type {
 } from "../../accounting/core/types/accountingTypes";
 import type { LedgerApiResponse } from "../types";
 import type { LedgerRepository } from "./LedgerRepository";
+import { normalizeContainerForStorage } from "../accountingMath";
 
 export class RemoteLedgerRepository implements LedgerRepository {
 	async getVersion(): Promise<string | null> {
@@ -14,7 +15,9 @@ export class RemoteLedgerRepository implements LedgerRepository {
 
 	async loadLedger(): Promise<LedgerApiResponse> {
 		const { data } = await api.get<LedgerApiResponse>("/api/cont-ledger");
-		return data;
+		return data.registro
+			? { ...data, registro: normalizeContainerForStorage(data.registro) }
+			: data;
 	}
 
 	async saveLedger(
@@ -22,7 +25,7 @@ export class RemoteLedgerRepository implements LedgerRepository {
 		inventarioRegistro: InventarioRegistro | null,
 	): Promise<void> {
 		await api.put("/api/cont-ledger", {
-			registro,
+			registro: normalizeContainerForStorage(registro),
 			inventarioRegistro: inventarioRegistro ?? null,
 		});
 	}

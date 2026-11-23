@@ -1,9 +1,16 @@
 import axios from "axios";
 
+const DEFAULT_SERVER_URL = "https://sysgd-production.up.railway.app";
+const storedServerUrl =
+	typeof window !== "undefined"
+		? window.localStorage.getItem("sysgd_server_url")
+		: null;
+
 let baseURL =
-	typeof import.meta !== "undefined"
-		? (import.meta.env.VITE_SERVER_URL ?? "https://sysgd-production.up.railway.app")
-		: "https://sysgd-production.up.railway.app";
+	storedServerUrl ||
+	(typeof import.meta !== "undefined"
+		? (import.meta.env.VITE_SERVER_URL ?? DEFAULT_SERVER_URL)
+		: DEFAULT_SERVER_URL);
 
 const api = axios.create({
 	baseURL,

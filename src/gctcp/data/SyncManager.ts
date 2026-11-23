@@ -3,6 +3,7 @@ import type {
 	CloudLedgerContainer,
 	InventarioRegistro,
 } from "../../accounting/core/types/accountingTypes";
+import type { LedgerApiResponse } from "../types";
 import type { LedgerRepository } from "./LedgerRepository";
 import { LocalLedgerRepository } from "./LocalLedgerRepository";
 import { RemoteLedgerRepository } from "./RemoteLedgerRepository";
@@ -21,7 +22,19 @@ export interface SyncResult {
 	message?: string;
 	updatedAt?: string | null;
 	remoteUpdatedAt?: string | null;
+	/** true cuando el ledger local fue reemplazado por el de la nube. */
+	pulled?: boolean;
 }
+
+export interface SyncOptions {
+	/** En el primer inicio desde la nube, la nube manda sobre el equipo local. */
+	preferRemote?: boolean;
+}
+
+const EMPTY_LEDGER: CloudLedgerContainer = {
+	activeWorkspaceId: "",
+	workspaces: [],
+};
 
 const SYNC_TIMESTAMP_KEY = "sysgd_last_sync_updated_at";
 
@@ -63,16 +76,24 @@ export class SyncManager {
 		return Boolean(localStorage.getItem("token"));
 	}
 
+	private hasWorkspaces(registro: CloudLedgerContainer | null): boolean {
+		return Boolean(registro?.workspaces?.length);
+	}
+
+	private isRemoteNewer(remote: LedgerApiResponse, local: LedgerApiResponse): boolean {
+		if (!remote.updatedAt) return false;
+		if (!local.updatedAt) return true;
+		return remote.updatedAt > local.updatedAt;
+	}
+
 	/**
 	 * Ejecuta la sincronización con detección de conflictos.
-	 * 
-	 * Flujo:
-	 * 1. GET /version: verificar si la nube tiene datos nuevos (ligero)
-	 * 2. Si el updatedAt cambió desde el último sync → conflicto
-	 * 3. Si hay conflicto, el componente muestra un diálogo y decide
-	 * 4. Si no hay conflicto: push local + guardar sync time
+	 *
+	 * Primer inicio desde la nube: descarga el ledger remoto y lo establece
+	 * localmente. En sincronizaciones posteriores: si la nube cambió, pide
+	 * resolución de conflicto; si no, sube los cambios locales.
 	 */
-	async sync(): Promise<SyncResult> {
+	async sync(options: SyncOptions = {}): Promise<SyncResult> {
 		if (!this.hasServerSession()) {
 			return { state: "no-session" };
 		}
@@ -82,8 +103,86 @@ export class SyncManager {
 			const remoteTime = await this.remote.getVersion();
 			const savedTime = getSavedSyncTime();
 
+			// ── PRIMER SYNC: ESTABLECER LA BASE DE DATOS ───────────────────
+			if (!savedTime) {
+				const local = await this.local.loadLedger();
+				const localRegistro = local.registro ?? EMPTY_LEDGER;
+				const localHasData = this.hasWorkspaces(localRegistro);
+
+				const remote = await this.remote.loadLedger();
+				const remoteRegistro = remote.registro ?? EMPTY_LEDGER;
+				const remoteHasData = this.hasWorkspaces(remoteRegistro);
+
+				if (
+					remoteHasData &&
+					(options.preferRemote ||
+						!localHasData ||
+						this.isRemoteNewer(remote, local))
+				) {
+					await this.local.saveLedger(
+						remoteRegistro,
+						remote.inventarioRegistro ?? null,
+					);
+					const syncTime = remote.updatedAt ?? remoteTime ?? null;
+					saveSyncTime(syncTime);
+					return {
+						state: "synced",
+						message: "Datos de la nube descargados",
+						updatedAt: syncTime,
+						pulled: true,
+					};
+				}
+
+				if (localHasData) {
+					await this.remote.saveLedger(
+						localRegistro,
+						local.inventarioRegistro ?? null,
+					);
+					const pushedTime = await this.remote.getVersion().catch(() => null);
+					const syncTime =
+						pushedTime ?? remoteTime ?? local.updatedAt ?? new Date().toISOString();
+					saveSyncTime(syncTime);
+					return {
+						state: "synced",
+						message: "Datos locales subidos a la nube",
+						updatedAt: syncTime,
+					};
+				}
+
+				const syncTime = remote.updatedAt ?? remoteTime ?? null;
+				saveSyncTime(syncTime);
+				return {
+					state: "synced",
+					message: "Sin datos para sincronizar",
+					updatedAt: syncTime,
+				};
+			}
+
+			const local = await this.local.loadLedger();
+			const registro = local.registro ?? EMPTY_LEDGER;
+			const localHasData = this.hasWorkspaces(registro);
+
+			if (!localHasData) {
+				const remote = await this.remote.loadLedger();
+				const remoteRegistro = remote.registro ?? EMPTY_LEDGER;
+				if (this.hasWorkspaces(remoteRegistro)) {
+					await this.local.saveLedger(
+						remoteRegistro,
+						remote.inventarioRegistro ?? null,
+					);
+					const syncTime = remote.updatedAt ?? remoteTime ?? null;
+					saveSyncTime(syncTime);
+					return {
+						state: "synced",
+						message: "Datos de la nube descargados",
+						updatedAt: syncTime,
+						pulled: true,
+					};
+				}
+			}
+
 			// Detectar conflicto: la nube tiene datos que no teníamos
-			if (remoteTime && savedTime && remoteTime !== savedTime) {
+			if (remoteTime && remoteTime !== savedTime) {
 				return {
 					state: "conflict",
 					message: "La nube tiene datos nuevos (posiblemente del teléfono)",
@@ -93,18 +192,15 @@ export class SyncManager {
 			}
 
 			// ── PUSH ─────────────────────────────────────────────────────────
-			const local = await this.local.loadLedger();
-			const registro = local.registro ?? {
-				activeWorkspaceId: "",
-				workspaces: [],
-			};
 			await this.remote.saveLedger(
 				registro,
 				local.inventarioRegistro ?? null,
 			);
 
 			// ── SAVE SYNC TIME ───────────────────────────────────────────────
-			const newSyncTime = remoteTime ?? local.updatedAt ?? new Date().toISOString();
+			const pushedTime = await this.remote.getVersion().catch(() => null);
+			const newSyncTime =
+				pushedTime ?? remoteTime ?? local.updatedAt ?? new Date().toISOString();
 			saveSyncTime(newSyncTime);
 
 			return {
@@ -147,6 +243,7 @@ export class SyncManager {
 				state: "synced",
 				message: "Datos de la nube aplicados localmente",
 				updatedAt: remote.updatedAt,
+				pulled: true,
 			};
 		} catch {
 			return { state: "offline" };
@@ -168,7 +265,13 @@ export class SyncManager {
 				registro,
 				local.inventarioRegistro ?? null,
 			);
-			return { state: "synced", message: "Datos subidos a la nube" };
+			const pushedTime = await this.remote.getVersion().catch(() => null);
+			saveSyncTime(pushedTime);
+			return {
+				state: "synced",
+				message: "Datos subidos a la nube",
+				updatedAt: pushedTime,
+			};
 		} catch {
 			return { state: "offline" };
 		}

@@ -4,6 +4,7 @@ import type {
 } from "../../accounting/core/types/accountingTypes";
 import type { LedgerApiResponse } from "../types";
 import type { LedgerRepository } from "./LedgerRepository";
+import { normalizeContainerForStorage } from "../accountingMath";
 
 const EMPTY_LEDGER: CloudLedgerContainer = {
 	activeWorkspaceId: "",
@@ -14,7 +15,10 @@ export class LocalLedgerRepository implements LedgerRepository {
 	async loadLedger(): Promise<LedgerApiResponse> {
 		const electronAPI = window.electronAPI;
 		if (electronAPI?.loadLedger) {
-			return electronAPI.loadLedger();
+			const response = await electronAPI.loadLedger();
+			return response.registro
+				? { ...response, registro: normalizeContainerForStorage(response.registro) }
+				: response;
 		}
 		return { registro: EMPTY_LEDGER, inventarioRegistro: null, updatedAt: null };
 	}
@@ -25,7 +29,7 @@ export class LocalLedgerRepository implements LedgerRepository {
 	): Promise<void> {
 		const electronAPI = window.electronAPI;
 		if (electronAPI?.saveLedger) {
-			await electronAPI.saveLedger(registro, inventarioRegistro);
+			await electronAPI.saveLedger(normalizeContainerForStorage(registro), inventarioRegistro);
 		}
 	}
 }

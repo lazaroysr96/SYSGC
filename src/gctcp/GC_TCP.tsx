@@ -26,6 +26,7 @@ import { useStartup } from "@/contexts/StartupContext";
 import { useGcTcpAuth } from "./hooks/useGcTcpAuth";
 import { useSyncManager } from "./hooks/useSyncManager";
 import { useEntryRegistry } from "./hooks/useEntryRegistry";
+import { useTributoRegistry } from "./hooks/useTributoRegistry";
 import EntryFormDialog from "./EntryFormDialog";
 import type { SyncState } from "./data/SyncManager";
 import type { CatalogoCompra, CatalogoVenta, CloudLedgerContainer, HistorialPrecio, Moneda, MonedaTasa, MonedaTasaHistorial, RrhhBackupData, StockRegistro, Tercero, TerceroRol, WalletMovimiento, WalletMovimientoTipo, WalletReferenciaTipo, WalletTipo } from "../accounting/core/types/accountingTypes";
@@ -55,9 +56,10 @@ import {
   ResumenView,
   SupportView,
   TercerosView,
-  TributosView,
   type TerceroUpsert,
 } from "./views";
+import { TributosView } from "./tributos/TributosView";
+import { generateDjPdf } from "./dj/generateDj";
 import CajaBanco from "./modules/CajaBaco";
 import { VincularLanCard } from "./vinculolan/VincularLan";
 import DjGeneral from "./dj/General";
@@ -107,13 +109,15 @@ const GC_TCP: FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user, loading: authLoading, desktopMode } = useGcTcpAuth();
-  const { resetStartup } = useStartup();
+  const { startMode, resetStartup } = useStartup();
+  const cloudMode = startMode === "cloud";
   const {
     state: syncState,
     message: syncMessage,
+    dataVersion,
     runSync,
     resolveConflict,
-  } = useSyncManager(desktopMode);
+  } = useSyncManager(desktopMode, cloudMode);
   const [conflictOpen, setConflictOpen] = useState(false);
   const [conflictResolving, setConflictResolving] = useState(false);
 
@@ -166,7 +170,10 @@ const GC_TCP: FC = () => {
   let loadLedgerRunCount = 0;
 
 const loadLedger = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoadingLedger(false);
+      return;
+    }
     loadLedgerRunCount++;
     console.log(`[GC_TCP] loadLedger called #${loadLedgerRunCount}`, {
       loadingLedger: data === null,
@@ -202,6 +209,10 @@ const loadLedger = useCallback(async () => {
     if (user) void loadLedger();
   }, [loadLedger, user]);
 
+  useEffect(() => {
+    if (dataVersion > 0) void loadLedger();
+  }, [dataVersion, loadLedger]);
+
   const ledger = data?.registro ?? null;
   const baseActiveWorkspace =
     ledger?.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
@@ -224,13 +235,34 @@ const loadLedger = useCallback(async () => {
     null;
   const activeWorkspace = activeAnalysis?.workspace ?? null;
 
+  const handleLedgerChange = useCallback(
+    (updated: CloudLedgerContainer) =>
+      setData((current) => (current ? { ...current, registro: updated } : current)),
+    [],
+  );
+
   const entryRegistry = useEntryRegistry({
     container: ledger,
     activeWorkspaceId,
+    selectedYear,
     repository,
-    onDataChange: (updated) =>
-      setData((current) => (current ? { ...current, registro: updated } : current)),
+    inventarioRegistro: data?.inventarioRegistro ?? null,
+    onDataChange: handleLedgerChange,
   });
+
+  const tributoRegistry = useTributoRegistry({
+    container: ledger,
+    activeWorkspaceId,
+    selectedYear,
+    repository,
+    inventarioRegistro: data?.inventarioRegistro ?? null,
+    onDataChange: handleLedgerChange,
+  });
+
+  const handleGenerateDj = useCallback(() => {
+    if (!activeWorkspace) return;
+    generateDjPdf(activeWorkspace, selectedYear);
+  }, [activeWorkspace, selectedYear]);
 
   useEffect(() => {
     if (!baseActiveWorkspace) return;
@@ -519,7 +551,6 @@ const loadLedger = useCallback(async () => {
   const handleUpdateProductPrice = async (payload: ProductPriceUpdate) => {
     if (!ledger || !activeWorkspace) return;
     const now = Date.now();
-    const isoDate = new Date(now).toISOString();
     const product = activeWorkspace.registro.inventario.productos.find((item) => item.id === payload.productId);
     if (!product) return;
 
@@ -533,7 +564,6 @@ const loadLedger = useCallback(async () => {
         id: `price-${payload.productId}-${payload.tipoPrecio.toLowerCase()}-${now}`,
         productoId: payload.productId,
         almacenId: principalWarehouse?.id ?? "principal",
-        fechaDesde: isoDate,
         precio: payload.precio,
         moneda: "CUP",
         tipoPrecio: payload.tipoPrecio,
@@ -1140,7 +1170,19 @@ const handleCreateMovimiento = async (payload: {
       }
       case "tributos":
         return (
-          <TributosView workspace={activeWorkspace} analysis={activeAnalysis} />
+          <TributosView
+            workspace={activeWorkspace}
+            analysis={activeAnalysis}
+            selectedYear={selectedYear}
+            saving={tributoRegistry.saving}
+            onSaveMonth={(monthIndex, row) => {
+              void tributoRegistry.saveMonth(monthIndex, row);
+            }}
+            onUpdateConfig={(key, update, cuentaIds) => {
+              void tributoRegistry.updateConfig(key, update, cuentaIds);
+            }}
+            onGenerateDj={handleGenerateDj}
+          />
         );
       case "resumen":
         return <ResumenView analysis={activeAnalysis} />;
@@ -1345,10 +1387,10 @@ const handleCreateMovimiento = async (payload: {
               </Badge>
               {desktopMode && (
                 <Badge className="bg-emerald-600 text-white dark:bg-emerald-500 dark:text-emerald-950">
-                  Modo Local
+                  {cloudMode ? "Modo Nube" : "Modo Local"}
                 </Badge>
               )}
-              {desktopMode && (
+              {desktopMode && cloudMode && (
                 <div className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-800 dark:bg-slate-900">
                   <SyncStateIcon state={syncState} />
                   <span
@@ -1446,7 +1488,6 @@ const handleCreateMovimiento = async (payload: {
                   setConflictResolving(false);
                   if (result.state === "synced") {
                     setConflictOpen(false);
-                    void loadLedger();
                   }
                 });
               }}
