@@ -1,6 +1,6 @@
 {
   "name": "electron",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Sistema de Gestión de Documentos - Aplicación de escritorio",
   "main": "main.js",
   "homepage": "https://github.com/unisofthub/SYSGD",
